@@ -47,11 +47,6 @@ from axolotl.ecc.djbec import *
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import requests
 from proto import zowsup_pb2
-
-from core.layers.protocol_presence.protocolentities.presence_subscribe import SubscribePresenceProtocolEntity
-
-import uuid,traceback
-from app.param_not_enough_exception import ParamsNotEnoughException
 import asyncio
 
 logger = logging.getLogger(__name__)
