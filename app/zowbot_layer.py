@@ -693,16 +693,14 @@ class ZowBotLayer(YowInterfaceLayer):
             await self._sendIq(signEntity)                 
             self.genProfile(p4) 
             return 
-    
-
-                            
+              
     @ProtocolEntityCallback("failure")
     def onFailure(self, entity):
         self.logger.info("Login Fail")     
         self.loginFailCount+=1        
         if entity.reason=="403" or entity.reason=="401" or entity.reason=="405" or entity.reason=="404":
-            if entity.violation_reason is not None:
-                reason = entity.reason+":"+entity.violation_reason+"("+Utils.violationTypeName(int(entity.violation_type))+")"
+            if entity.violation_type is not None:
+                reason = entity.reason+":"+Utils.violationTypeName(int(entity.violation_type))
             else:
                 reason = entity.reason
 
