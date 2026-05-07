@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Button, Space, Tag, Typography, Select } from 'antd'
-import { ClearOutlined, VerticalAlignBottomOutlined, PauseOutlined } from '@ant-design/icons'
+import { ClearOutlined, VerticalAlignBottomOutlined, PauseOutlined, RobotOutlined } from '@ant-design/icons'
 import { useDashboardStore } from '../store'
 import type { BotLogEntry } from '../store'
 
@@ -28,18 +28,19 @@ function LogLine({ entry }: { entry: BotLogEntry }) {
   const color = LEVEL_COLOR[entry.level] ?? '#d9d9d9'
   return (
     <div
-      style={{
-        fontFamily: 'monospace',
-        fontSize: 12,
-        lineHeight: '20px',
-        padding: '1px 8px',
-        borderBottom: '1px solid #1f1f1f',
-        display: 'flex',
-        gap: 8,
-        alignItems: 'flex-start',
-      }}
+      style={{ fontFamily: 'monospace', fontSize: 12, lineHeight: '20px', padding: '1px 8px',
+        borderBottom: '1px solid #1f1f1f', display: 'flex', gap: 8, alignItems: 'flex-start' }}
     >
       <Text style={{ color: '#595959', flexShrink: 0, fontSize: 11 }}>{entry.ts}</Text>
+      {entry.bot_id && (
+        <Tag
+          icon={<RobotOutlined />}
+          color="blue"
+          style={{ minWidth: 50, textAlign: 'center', margin: 0, flexShrink: 0, fontSize: 10, lineHeight: '18px' }}
+        >
+          {entry.bot_id.slice(-6)}
+        </Tag>
+      )}
       <Tag
         color={color}
         style={{ minWidth: 60, textAlign: 'center', margin: 0, flexShrink: 0, fontSize: 11 }}
@@ -59,6 +60,9 @@ function LogLine({ entry }: { entry: BotLogEntry }) {
 const BotLogsPage: React.FC = () => {
   const logs = useDashboardStore((s) => s.botLogs)
   const clearBotLogs = useDashboardStore((s) => s.clearBotLogs)
+  const activeBots = useDashboardStore((s) => s.activeBots)
+  const selectedLogBotId = useDashboardStore((s) => s.selectedLogBotId)
+  const setSelectedLogBotId = useDashboardStore((s) => s.setSelectedLogBotId)
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -87,6 +91,25 @@ const BotLogsPage: React.FC = () => {
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <Space>
+          {/* Bot selector */}
+          <Select
+            size="small"
+            value={selectedLogBotId ?? 'ALL'}
+            onChange={(v) => setSelectedLogBotId(v === 'ALL' ? null : v)}
+            options={[
+              { value: 'ALL', label: '全部Bot' },
+              ...activeBots.map((b) => ({
+                value: b.phone,
+                label: (
+                  <span>
+                    <RobotOutlined style={{ marginRight: 4, color: b.running ? '#52c41a' : '#aaa' }} />
+                    {b.phone}
+                  </span>
+                ),
+              })),
+            ]}
+            style={{ width: 160 }}
+          />
           <Select
             size="small"
             value={minLevel}

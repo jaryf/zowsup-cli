@@ -34,7 +34,7 @@ from flask import Blueprint, Response, current_app, request, stream_with_context
 
 from app.dashboard.api.auth import check_bearer
 from app.dashboard.api.rate_limit import limiter
-from app.dashboard.utils.bot_status import read_status, _pid_alive
+from app.dashboard.utils.bot_status import read_status, read_all_statuses, _pid_alive
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,9 @@ _PID_FILE = Path("data") / "bot.pid"
 _BOT_STARTUP_TIMEOUT = 30  # seconds to wait for link-code to appear
 _BOT_CONNECT_TIMEOUT = 60  # seconds to wait for main.py to reach running state
 
-# Running main.py process started via /api/bot/start (kept for log streaming)
-_start_proc: "subprocess.Popen | None" = None
+# Dict of running main.py processes keyed by phone string.
+# Replaces the old single _start_proc variable.
+_start_procs: "dict[str, subprocess.Popen]" = {}
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +70,9 @@ def _bot_auth():
 
 @bot_bp.get("/status")
 def get_bot_status():
-    """Return running state of the bot process."""
-    status = read_status()
+    """Return running state of a single bot (query ?phone=X) or legacy single-bot."""
+    phone = request.args.get("phone", "").strip().lstrip("+")
+    status = read_status(phone=phone or None)
     uptime: int | None = None
     if status.get("running") and status.get("started_at"):
         uptime = int(time.time() - status["started_at"])
@@ -78,9 +80,34 @@ def get_bot_status():
         "running": status.get("running", False),
         "jid": status.get("jid"),
         "pid": status.get("pid"),
+        "phone": status.get("phone"),
         "started_at": status.get("started_at"),
         "uptime_seconds": uptime,
     }
+
+
+# ---------------------------------------------------------------------------
+# B.0  GET /api/bot/list  — all known bots
+# ---------------------------------------------------------------------------
+
+@bot_bp.get("/list")
+def get_bot_list():
+    """Return status of all known bot accounts."""
+    statuses = read_all_statuses()
+    result = []
+    for s in statuses:
+        uptime = None
+        if s.get("running") and s.get("started_at"):
+            uptime = int(time.time() - s["started_at"])
+        result.append({
+            "running": s.get("running", False),
+            "jid": s.get("jid"),
+            "pid": s.get("pid"),
+            "phone": s.get("phone"),
+            "started_at": s.get("started_at"),
+            "uptime_seconds": uptime,
+        })
+    return {"bots": result}
 
 
 # ---------------------------------------------------------------------------
@@ -241,21 +268,27 @@ def post_login_linkcode():
 @bot_bp.post("/logout")
 @limiter.limit("10 per minute")
 def post_logout():
-    """Send SIGTERM to the running bot process."""
+    """Send SIGTERM to a running bot. Body JSON: {phone} (optional)."""
     from app.dashboard.utils.bot_status import clear_status
-    status = read_status()
+    body = request.get_json(silent=True) or {}
+    phone = str(body.get("phone", "")).strip().lstrip("+") or None
+    status = read_status(phone=phone)
     pid = status.get("pid")
     if not status.get("running") or not pid:
         return {"error": "Bot is not running"}, 409
 
     try:
         _terminate_pid(pid)
-        logger.info("Sent SIGTERM to bot PID=%s", pid)
-        clear_status()
+        logger.info("Sent SIGTERM to bot PID=%s phone=%s", pid, phone)
+        clear_status(phone=phone)
+        # Also clean up the proc from our dict
+        if phone and phone in _start_procs:
+            del _start_procs[phone]
         return {"ok": True, "pid": pid}
     except ProcessLookupError:
-        # Process already gone — clean up the stale status file
-        clear_status()
+        clear_status(phone=phone)
+        if phone and phone in _start_procs:
+            del _start_procs[phone]
         logger.info("Bot PID=%s was already gone; status cleared", pid)
         return {"ok": True, "pid": pid, "note": "process was already stopped"}
     except PermissionError:
@@ -276,8 +309,6 @@ def post_bot_start():
     Request body (JSON): {"phone": "989334018988"}
     Response:            {"ok": true, "pid": 12345}
     """
-    global _start_proc
-
     body = request.get_json(silent=True) or {}
     phone = str(body.get("phone", "")).strip().lstrip("+")
     if not phone:
@@ -285,25 +316,25 @@ def post_bot_start():
     if not phone.isdigit() or not (7 <= len(phone) <= 15):
         return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
 
-    # Refuse to double-start if a process is already alive
-    status = read_status()
+    # Refuse to double-start the same phone
+    status = read_status(phone=phone)
     if status.get("running") and status.get("pid") and _pid_alive(status["pid"]):
-        return {"error": "Bot is already running", "pid": status["pid"]}, 409
+        return {"ok": True, "pid": status["pid"], "already_running": True}
 
     script_path = _resolve_script("main.py")
     if not script_path.exists():
         return {"error": "script/main.py not found"}, 404
 
-    # Kill any previous start proc so its stdout pipe is freed
-    if _start_proc is not None and _start_proc.poll() is None:
+    # Kill any previous proc for this phone so its stdout pipe is freed
+    prev = _start_procs.get(phone)
+    if prev is not None and prev.poll() is None:
         try:
-            _start_proc.terminate()
+            prev.terminate()
         except OSError:
             pass
-    _start_proc = None
 
     try:
-        _start_proc = subprocess.Popen(
+        proc = subprocess.Popen(
             [sys.executable, str(script_path), phone],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -313,9 +344,10 @@ def post_bot_start():
             cwd=str(Path.cwd()),
             env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
         )
-        _write_pid_file(_start_proc.pid)
-        logger.info("Bot start subprocess launched, PID=%s, phone=%s", _start_proc.pid, phone)
-        return {"ok": True, "pid": _start_proc.pid}
+        _start_procs[phone] = proc
+        _write_pid_file(proc.pid)
+        logger.info("Bot start subprocess launched, PID=%s, phone=%s", proc.pid, phone)
+        return {"ok": True, "pid": proc.pid}
     except OSError as exc:
         logger.error("Failed to start script/main.py: %s", exc)
         return {"error": str(exc)}, 500
@@ -328,34 +360,32 @@ def post_bot_start():
 @bot_bp.get("/start-stream")
 def get_start_stream():
     """
-    SSE stream that pushes stdout lines from the running bot start subprocess.
-
-    Streams until one of:
-      - bot_status.json reports running=True  → event: status {type: "connected"}
-      - subprocess exits with non-zero code   → event: status {type: "error"}
-      - _BOT_CONNECT_TIMEOUT seconds elapsed  → event: status {type: "timeout"}
-
-    After the stream ends the subprocess keeps running.  A persistent drain
-    thread keeps reading (and discarding) its stdout so the OS pipe buffer
-    never fills up and blocks the bot process.
-
-    Event types:
-      event: log     data: <text line>
-      event: status  data: {"type": "connected"|"error"|"timeout", "msg": "..."}
+    SSE stream for a specific bot's startup progress.
+    Query params: phone (required), token (auth)
     """
-    global _start_proc
+    phone = request.args.get("phone", "").strip().lstrip("+")
 
     token = request.args.get("token", "")
     from app.dashboard.api.auth import check_bearer
-    # Re-use the same Bearer check but for the query-param token passed by SSE clients
     if token:
         import flask
         flask.request.environ["HTTP_AUTHORIZATION"] = f"Bearer {token}"
 
     def generate():
-        proc = _start_proc
+        proc = _start_procs.get(phone) if phone else None
         if proc is None:
-            yield _sse_event("status", {"type": "error", "msg": "No active start session"})
+            # Bot may have been started outside the dashboard or in a previous server session.
+            # If it's already running per status file, emit connected immediately.
+            st = read_status(phone=phone or None)
+            if st.get("running") and st.get("pid") and _pid_alive(st["pid"]):
+                yield _sse_event("status", {
+                    "type": "connected",
+                    "jid": st.get("jid"),
+                    "pid": st.get("pid"),
+                    "phone": phone,
+                })
+            else:
+                yield _sse_event("status", {"type": "error", "msg": "No active start session for this phone"})
             return
 
         deadline = time.time() + _BOT_CONNECT_TIMEOUT
@@ -370,12 +400,13 @@ def get_start_stream():
                 if line:
                     yield _sse_event("log", line)
                 # Check if bot is now connected
-                st = read_status()
+                st = read_status(phone=phone or None)
                 if st.get("running") and st.get("pid") == proc.pid:
                     yield _sse_event("status", {
                         "type": "connected",
                         "jid": st.get("jid"),
                         "pid": st.get("pid"),
+                        "phone": phone,
                     })
                     _start_drain_thread(proc)
                     return
@@ -388,12 +419,13 @@ def get_start_stream():
         # Process exited — report outcome
         rc = proc.poll()
         if rc == 0:
-            st = read_status()
+            st = read_status(phone=phone or None)
             if st.get("running"):
                 yield _sse_event("status", {
                     "type": "connected",
                     "jid": st.get("jid"),
                     "pid": st.get("pid"),
+                    "phone": phone,
                 })
             else:
                 yield _sse_event("status", {"type": "error",
@@ -531,15 +563,18 @@ def list_accounts():
         logger.warning("Cannot load SysVar: %s", exc)
         return {"error": str(exc)}, 500
 
-    status = read_status()
-    running_jid = status.get("jid") or ""
-    running_phone = running_jid.split("@")[0] if running_jid else ""
+    all_statuses = read_all_statuses()
+    running_phones = {
+        s.get("phone", "")
+        for s in all_statuses
+        if s.get("running") and s.get("pid") and _pid_alive(s["pid"])
+    }
 
     failed = _read_failed()
 
     accounts = []
     if account_path.exists():
-        for entry in sorted(account_path.iterdir()):
+        for entry in account_path.iterdir():
             if not entry.is_dir():
                 continue
             phone = entry.name
@@ -556,13 +591,23 @@ def list_accounts():
             except Exception:
                 pass
 
+            try:
+                import datetime as _dt
+                last_seen = _dt.datetime.utcfromtimestamp(entry.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except Exception:
+                last_seen = None
+
             accounts.append({
                 "phone": phone,
                 "pushname": pushname,
-                "is_running": (phone == running_phone),
+                "is_running": (phone in running_phones),
                 "is_failed": (phone in failed),
                 "failed_at": failed.get(phone),
+                "last_seen": last_seen,
             })
+
+    # Sort by last_seen descending (most recently touched first)
+    accounts.sort(key=lambda a: a["last_seen"] or "", reverse=True)
 
     return {"accounts": accounts}
 

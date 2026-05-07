@@ -38,6 +38,8 @@
     "botOnline": "Bot 在线",
     "botOnlineJid": "Bot 在线 — {{jid}}",
     "botOffline": "Bot 离线",
+    "botsRunning": "{{count}} 个 Bot 运行中",
+    "botsNone": "无运行中 Bot",
     "wsConnected": "WebSocket 已连接",
     "wsDisconnected": "WebSocket 未连接",
     "realtime": "实时",

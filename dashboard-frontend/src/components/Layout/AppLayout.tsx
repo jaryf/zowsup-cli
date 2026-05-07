@@ -12,7 +12,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useDashboardStore } from '../../store'
-import { fetchBotStatus, BotStatus } from '../../api/endpoints'
+import { fetchBotAccounts } from '../../api/endpoints'
 
 const { Sider, Header, Content } = Layout
 const { Text } = Typography
@@ -28,14 +28,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const wsConnected = useDashboardStore((s) => s.wsConnected)
   const collapsed = useDashboardStore((s) => s.siderCollapsed)
   const setSiderCollapsed = useDashboardStore((s) => s.setSiderCollapsed)
-  const [botStatus, setBotStatus] = useState<BotStatus | null>(null)
+  const [runningCount, setRunningCount] = useState<number>(0)
 
-  // Poll bot status every 10 s
+  // Poll running bot count every 10 s
   useEffect(() => {
     const load = () => {
-      fetchBotStatus()
-        .then(setBotStatus)
-        .catch(() => setBotStatus(null))
+      fetchBotAccounts()
+        .then((res) => setRunningCount(res.accounts.filter((a) => a.is_running).length))
+        .catch(() => setRunningCount(0))
     }
     load()
     const timer = setInterval(load, 10_000)
@@ -131,30 +131,20 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               </Button>
             </Tooltip>
 
-            {/* Bot online status */}
-            <Tooltip
-              title={
-                botStatus?.running
-                  ? botStatus.jid
-                    ? t('header.botOnlineJid', { jid: botStatus.jid })
-                    : t('header.botOnline')
-                  : t('header.botOffline')
-              }
-            >
+            {/* Running bot count */}
+            <Tooltip title={runningCount > 0 ? t('header.botsRunning', { count: runningCount }) : t('header.botsNone')}>
               <Badge
-                status={botStatus?.running ? 'success' : 'default'}
+                status={runningCount > 0 ? 'success' : 'default'}
                 text={
-                  botStatus?.running ? (
+                  runningCount > 0 ? (
                     <span style={{ color: '#52c41a' }}>
                       <RobotOutlined style={{ marginRight: 4 }} />
-                      {botStatus.jid
-                        ? botStatus.jid.replace('@s.whatsapp.net', '')
-                        : t('header.online')}
+                      {runningCount}
                     </span>
                   ) : (
                     <span style={{ color: '#8c8c8c' }}>
                       <RobotOutlined style={{ marginRight: 4 }} />
-                      {t('header.offline')}
+                      0
                     </span>
                   )
                 }

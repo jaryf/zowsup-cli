@@ -1225,9 +1225,9 @@ class ZowBotLayer(YowInterfaceLayer):
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute(
                     "INSERT INTO chat_messages "
-                    "(user_jid, direction, content, message_type, timestamp) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (user_jid, direction, content, message_type, int(_time.time())),
+                    "(user_jid, direction, content, message_type, timestamp, bot_jid) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (user_jid, direction, content, message_type, int(_time.time()), self.bot.botId),
                 )
                 conn.commit()
             finally:

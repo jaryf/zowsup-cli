@@ -18,6 +18,14 @@ interface ContactEntry {
   last_timestamp: number | null
   unread: number
   avatar_url?: string | null
+  bot_jid?: string | null
+}
+
+export interface BotInfo {
+  phone: string
+  jid: string | null
+  running: boolean
+  uptime_seconds: number | null
 }
 
 interface DashboardState {
@@ -56,6 +64,10 @@ interface DashboardState {
   // Logs
   botLogs: BotLogEntry[]
 
+  // Multi-account
+  activeBots: BotInfo[]
+  selectedLogBotId: string | null
+
   // UI
   siderCollapsed: boolean
 }
@@ -65,6 +77,7 @@ export interface BotLogEntry {
   level: string
   logger: string
   message: string
+  bot_id?: string
 }
 
 interface DashboardActions {
@@ -94,6 +107,9 @@ interface DashboardActions {
   setStrategyHistory: (history: StrategyRecord[]) => void
 
   setSiderCollapsed: (v: boolean) => void
+
+  setActiveBots: (bots: BotInfo[]) => void
+  setSelectedLogBotId: (id: string | null) => void
 
   appendBotLog: (entry: BotLogEntry) => void
   appendBotLogs: (entries: BotLogEntry[]) => void
@@ -141,6 +157,9 @@ export const useDashboardStore = create<StoreState>()(
     siderCollapsed: false,
 
     botLogs: [],
+
+    activeBots: [],
+    selectedLogBotId: null,
 
     // ---- Actions ----
     setApiToken: (token) =>
@@ -207,6 +226,7 @@ export const useDashboardStore = create<StoreState>()(
         if (c) {
           c.last_message = msg.content
           c.last_timestamp = msg.timestamp
+          if (msg.bot_jid) c.bot_jid = msg.bot_jid
         } else {
           // Brand-new contact — add to top of the list
           s.contacts.unshift({
@@ -217,6 +237,7 @@ export const useDashboardStore = create<StoreState>()(
             last_message: msg.content,
             last_timestamp: msg.timestamp,
             unread: 0,
+            bot_jid: msg.bot_jid ?? null,
           })
         }
       }),
@@ -271,6 +292,17 @@ export const useDashboardStore = create<StoreState>()(
     setSiderCollapsed: (v) =>
       set((s) => {
         s.siderCollapsed = v
+      }),
+
+    setActiveBots: (bots) =>
+      set((s) => {
+        s.activeBots = bots
+      }),
+
+    setSelectedLogBotId: (id) =>
+      set((s) => {
+        s.selectedLogBotId = id
+        s.botLogs = []
       }),
 
     appendBotLog: (entry) =>

@@ -544,10 +544,10 @@ class AIService:
                 conn.execute(
                     """
                     INSERT INTO chat_messages
-                        (user_jid, direction, content, message_type, timestamp)
-                    VALUES (?, 'out', ?, 'text', ?)
+                        (user_jid, direction, content, message_type, timestamp, bot_jid)
+                    VALUES (?, 'out', ?, 'text', ?, ?)
                     """,
-                    (user_jid, ai_response, ts),
+                    (user_jid, ai_response, ts, bot_id or None),
                 )
                 conn.commit()
                 return in_row_id

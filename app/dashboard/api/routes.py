@@ -28,6 +28,16 @@ bp = Blueprint("api", __name__)
 logger = logging.getLogger(__name__)
 
 
+def _count_online_bots() -> int:
+    """Return the number of currently running bots."""
+    try:
+        from app.dashboard.utils.bot_status import read_all_statuses
+        statuses = read_all_statuses()
+        return sum(1 for s in statuses if s.get("running"))
+    except Exception:
+        return 0
+
+
 # ---------------------------------------------------------------------------
 # Phase 4: Bearer-token auth applied to all routes except /health
 # ---------------------------------------------------------------------------
@@ -93,6 +103,7 @@ def contacts():
             """
             SELECT
                 cm.user_jid,
+                cm.bot_jid,
                 cm.content        AS last_message,
                 cm.timestamp      AS last_timestamp,
                 agg.message_count,
@@ -100,14 +111,12 @@ def contacts():
             FROM chat_messages cm
             INNER JOIN (
                 SELECT user_jid,
-                       MAX(timestamp) AS max_ts,
+                       MAX(id)        AS max_id,
                        COUNT(*)       AS message_count
                 FROM   chat_messages
                 GROUP  BY user_jid
-            ) agg ON cm.user_jid = agg.user_jid
-                  AND cm.timestamp = agg.max_ts
+            ) agg ON cm.id = agg.max_id
             LEFT JOIN user_profiles up ON up.user_jid = cm.user_jid
-            GROUP  BY cm.user_jid
             ORDER  BY last_timestamp DESC
             """
         ).fetchall()
@@ -333,7 +342,7 @@ def chat_history():
         ).fetchone()[0]
 
         rows = conn.execute(
-            "SELECT cm.id, cm.user_jid, cm.direction, cm.content, cm.message_type, "
+            "SELECT cm.id, cm.user_jid, cm.bot_jid, cm.direction, cm.content, cm.message_type, "
             "       cm.timestamp, cm.created_at, at.urgency_level "
             "FROM chat_messages cm "
             "LEFT JOIN ai_thoughts at ON at.message_id = cm.id "
@@ -424,6 +433,7 @@ def statistics():
         "outgoing_messages": outgoing,
         "active_users": active_users,
         "total_users": total_users,
+        "online_bots": _count_online_bots(),
         "daily_breakdown": [dict(r) for r in daily_rows],
     }), 200
 

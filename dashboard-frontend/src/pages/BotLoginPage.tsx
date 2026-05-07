@@ -37,6 +37,8 @@ import {
   PlayCircleOutlined,
   QrcodeOutlined,
   ReloadOutlined,
+  RobotOutlined,
+  SearchOutlined,
   StopOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
@@ -45,7 +47,6 @@ import {
   postBotLoginLinkcode,
   postBotStart,
   postBotLogout,
-  fetchBotStatus,
   fetchBotAccounts,
   deleteBotAccount,
   patchToggleAccountFailed,
@@ -254,235 +255,6 @@ const LinkCodeTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLo
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Start-bot Tab  (启动已注册的 Bot)
-// ────────────────────────────────────────────────────────────────────────────
-
-type StartPhase = 'idle' | 'starting' | 'streaming' | 'connected' | 'error'
-
-const StartBotTab: React.FC = () => {
-  const { t } = useTranslation()
-  const [phase, setPhase] = useState<StartPhase>('idle')
-  const [logs, setLogs] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [connectedJid, setConnectedJid] = useState<string | null>(null)
-  const [botRunning, setBotRunning] = useState(false)
-  const [runningPid, setRunningPid] = useState<number | null>(null)
-  const [stopLoading, setStopLoading] = useState(false)
-  const esRef = useRef<EventSource | null>(null)
-  const logsBottomRef = useRef<HTMLDivElement>(null)
-  const [form] = Form.useForm()
-
-  // Poll bot status on mount so we show current state
-  useEffect(() => {
-    fetchBotStatus()
-      .then((s) => {
-        setBotRunning(s.running)
-        setRunningPid(s.pid)
-        if (s.running && s.jid) setConnectedJid(s.jid)
-      })
-      .catch(() => {})
-  }, [])
-
-  // Auto-scroll logs to bottom
-  useEffect(() => {
-    logsBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs])
-
-  const handleStart = async ({ phone }: { phone: string }) => {
-    esRef.current?.close()
-    setLogs([])
-    setError(null)
-    setConnectedJid(null)
-    setPhase('starting')
-
-    try {
-      const res = await postBotStart(phone.trim().replace(/^\+/, ''))
-      setLogs([t('startBot.botStarted', { pid: res.pid })])
-      setPhase('streaming')
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(t('startBot.startFailed', { msg }))
-      setPhase('error')
-      return
-    }
-
-    // Open SSE log stream
-    const token = getApiToken()
-    const url = `/api/bot/start-stream${token ? `?token=${encodeURIComponent(token)}` : ''}`
-    const es = new EventSource(url)
-    esRef.current = es
-
-    es.addEventListener('log', (e) => {
-      setLogs((prev) => [...prev, e.data])
-    })
-
-    es.addEventListener('status', (e) => {
-      try {
-        const payload = JSON.parse(e.data) as {
-          type: string
-          jid?: string
-          pid?: number
-          msg?: string
-        }
-        if (payload.type === 'connected') {
-          es.close()
-          setConnectedJid(payload.jid ?? null)
-          setBotRunning(true)
-          setRunningPid(payload.pid ?? null)
-          setPhase('connected')
-          setLogs((prev) => [...prev, t('startBot.connected', { jid: payload.jid ?? t('startBot.unknownJid') })])
-        } else if (payload.type === 'error') {
-          es.close()
-          setError(payload.msg ?? '')
-          setPhase('error')
-        } else if (payload.type === 'timeout') {
-          es.close()
-          // Timeout just means the stream closed; bot may still be connecting in background
-          setLogs((prev) => [...prev, t('startBot.logStreamEnded')])
-          setPhase('idle')
-          setBotRunning(true)
-        }
-      } catch {
-        // ignore parse errors
-      }
-    })
-
-    es.onerror = () => {
-      es.close()
-      if (phase === 'streaming') {
-        setLogs((prev) => [...prev, t('startBot.streamDisconnected')])
-        setPhase('idle')
-      }
-    }
-  }
-
-  const handleStop = async () => {
-    setStopLoading(true)
-    try {
-      await postBotLogout()
-      setBotRunning(false)
-      setRunningPid(null)
-      setConnectedJid(null)
-      setPhase('idle')
-      setLogs([])
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(t('startBot.stopFailed', { msg }))
-    } finally {
-      setStopLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      esRef.current?.close()
-    }
-  }, [])
-
-  return (
-    <Space direction="vertical" style={{ width: '100%' }}>
-      {/* Current status badge */}
-      <Space>
-        <Text>{t('startBot.currentStatus')}</Text>
-        {botRunning ? (
-          <Tag color="green">{t('startBot.running')}{runningPid ? ` (PID ${runningPid})` : ''}</Tag>
-        ) : (
-          <Tag color="default">{t('startBot.notRunning')}</Tag>
-        )}
-        {connectedJid && <Tag color="blue">{connectedJid}</Tag>}
-      </Space>
-
-      {botRunning ? (
-        <Button
-          danger
-          icon={<StopOutlined />}
-          loading={stopLoading}
-          onClick={handleStop}
-        >
-          {t('startBot.stop')}
-        </Button>
-      ) : (
-        <Form form={form} layout="inline" onFinish={handleStart}>
-          <Form.Item
-            name="phone"
-            rules={[
-              { required: true, message: t('startBot.phoneRequired') },
-              {
-                pattern: /^\+?\d{7,15}$/,
-                message: t('startBot.phoneFormat'),
-              },
-            ]}
-          >
-            <Input
-              placeholder="989334018988"
-              prefix="📱"
-              style={{ width: 240 }}
-              disabled={phase === 'starting' || phase === 'streaming'}
-            />
-          </Form.Item>
-          <Form.Item>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={phase === 'starting' || phase === 'streaming'}
-              icon={<PlayCircleOutlined />}
-            >
-              {t('startBot.start')}
-            </Button>
-          </Form.Item>
-        </Form>
-      )}
-
-      {error && (
-        <Alert
-          type="error"
-          message={error}
-          showIcon
-          closable
-          onClose={() => setError(null)}
-        />
-      )}
-
-      {phase === 'connected' && connectedJid && (
-        <Alert type="success" message={t('startBot.connected', { jid: connectedJid })} showIcon />
-      )}
-
-      {/* Log output */}
-      {logs.length > 0 && (
-        <div
-          style={{
-            background: '#111',
-            color: '#d4d4d4',
-            padding: '10px 14px',
-            borderRadius: 8,
-            fontFamily: 'monospace',
-            fontSize: 12,
-            lineHeight: 1.6,
-            maxHeight: 260,
-            overflowY: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
-        >
-          {logs.map((line, i) => (
-            <div key={i}>{line}</div>
-          ))}
-          <div ref={logsBottomRef} />
-        </div>
-      )}
-
-      {phase === 'streaming' && (
-        <Spin size="small" tip={t('startBot.connecting')} />
-      )}
-
-      <Paragraph type="secondary" style={{ marginTop: 8 }}>
-        {t('startBot.hint')}
-      </Paragraph>
-    </Space>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────────────
 // Bot Accounts Table
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -492,6 +264,8 @@ const AccountsSection: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [selectedPhones, setSelectedPhones] = useState<string[]>([])
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({})
+
+  const [searchQuery, setSearchQuery] = useState('')
 
   // Import modal
   const [importOpen, setImportOpen] = useState(false)
@@ -534,6 +308,12 @@ const AccountsSection: React.FC = () => {
     logsBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [startLogs])
 
+  // Auto-refresh every 10 s so running status stays up to date
+  useEffect(() => {
+    const id = setInterval(load, 10_000)
+    return () => clearInterval(id)
+  }, [load])
+
   const setRowBusy = (phone: string, busy: boolean) =>
     setRowLoading((prev) => ({ ...prev, [phone]: busy }))
 
@@ -545,8 +325,16 @@ const AccountsSection: React.FC = () => {
     setStartPhase('starting')
     setStartModalOpen(true)
 
+    let alreadyRunning = false
     try {
       const res = await postBotStart(phone)
+      if (res.already_running) {
+        alreadyRunning = true
+        setStartModalOpen(false)
+        msgApi.info(`Bot ${phone} 已在运行中`)
+        load()
+        return
+      }
       setStartLogs([t('bot.startSuccess', { pid: res.pid })])
       setStartPhase('streaming')
     } catch (err: unknown) {
@@ -555,9 +343,12 @@ const AccountsSection: React.FC = () => {
       setStartPhase('error')
       return
     }
+    if (alreadyRunning) return
 
     const token = getApiToken()
-    const url = `/api/bot/start-stream${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    const params = new URLSearchParams({ phone })
+    if (token) params.set('token', token)
+    const url = `/api/bot/start-stream?${params.toString()}`
     const es = new EventSource(url)
     esRef.current = es
 
@@ -586,6 +377,21 @@ const AccountsSection: React.FC = () => {
       es.close()
       setStartLogs((p) => [...p, t('startBot.streamDisconnected')])
       setStartPhase('done')
+    }
+  }
+
+  // ── One-click stop ──
+  const handleQuickStop = async (phone: string) => {
+    setRowBusy(phone, true)
+    try {
+      await postBotLogout(phone)
+      msgApi.success(`Bot ${phone} 已停止`)
+      load()
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      msgApi.error(msg)
+    } finally {
+      setRowBusy(phone, false)
     }
   }
 
@@ -681,6 +487,10 @@ const AccountsSection: React.FC = () => {
     }
   }
 
+  const filteredAccounts = searchQuery.trim()
+    ? accounts.filter((a) => a.phone.includes(searchQuery.trim()))
+    : accounts
+
   const failedCount = accounts.filter((a) => a.is_failed).length
 
   const columns: ColumnsType<BotAccount> = [
@@ -712,21 +522,35 @@ const AccountsSection: React.FC = () => {
       title: t('common.actions'),
       key: 'actions',
       fixed: 'right' as const,
-      width: 240,
+      width: 260,
       render: (_: unknown, record: BotAccount) => (
         <Space size={4}>
-          <Tooltip title={t('bot.quickStart')}>
-            <Button
-              size="small"
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              disabled={record.is_running}
-              loading={rowLoading[record.phone]}
-              onClick={() => handleQuickStart(record.phone)}
-            >
-              {t('bot.start')}
-            </Button>
-          </Tooltip>
+          {record.is_running ? (
+            <Tooltip title={t('startBot.stop')}>
+              <Button
+                size="small"
+                danger
+                icon={<StopOutlined />}
+                loading={rowLoading[record.phone]}
+                onClick={() => handleQuickStop(record.phone)}
+              >
+                {t('startBot.stop')}
+              </Button>
+            </Tooltip>
+          ) : (
+            <Tooltip title={t('bot.quickStart')}>
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                disabled={record.is_failed}
+                loading={rowLoading[record.phone]}
+                onClick={() => handleQuickStart(record.phone)}
+              >
+                {t('bot.start')}
+              </Button>
+            </Tooltip>
+          )}
           <Tooltip title={record.is_failed ? t('bot.unmarkFailed') : t('bot.markFailed')}>
             <Button
               size="small"
@@ -809,8 +633,40 @@ const AccountsSection: React.FC = () => {
       }
     >
       {contextHolder}
+
+      {/* Phone search */}
+      <Input
+        allowClear
+        prefix={<SearchOutlined />}
+        placeholder="搜索账号"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        style={{ marginBottom: 12, maxWidth: 280 }}
+      />
+
+      {/* Running bots summary banner */}
+      {accounts.some((a) => a.is_running) && (
+        <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
+          <Space wrap>
+            <Text style={{ color: '#52c41a' }}>
+              <RobotOutlined /> 运行中 ({accounts.filter((a) => a.is_running).length}):
+            </Text>
+            {accounts.filter((a) => a.is_running).map((b) => (
+              <Tag
+                key={b.phone}
+                color="green"
+                closable
+                onClose={(e) => { e.preventDefault(); handleQuickStop(b.phone) }}
+              >
+                {b.phone}
+              </Tag>
+            ))}
+          </Space>
+        </div>
+      )}
+
       <Table
-        dataSource={accounts}
+        dataSource={filteredAccounts}
         columns={columns}
         rowKey="phone"
         rowSelection={rowSelection}
@@ -956,13 +812,8 @@ const BotLoginPage: React.FC = () => {
         }
       >
         <Tabs
-          defaultActiveKey="start"
+          defaultActiveKey="scan"
           items={[
-            {
-              key: 'start',
-              label: (<span><PlayCircleOutlined /> {t('bot.startRegistered')}</span>),
-              children: <StartBotTab />,
-            },
             {
               key: 'scan',
               label: t('bot.scanQr'),

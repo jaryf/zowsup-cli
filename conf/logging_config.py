@@ -118,7 +118,7 @@ def get_log_level(level_name=None):
     return LOG_LEVELS[level_name]
 
 
-def setup_logging(level=None, enable_file=False, module_name_mode=None):
+def setup_logging(level=None, enable_file=False, module_name_mode=None, log_file_name=None):
     """
     初始化日志系统
     
@@ -176,9 +176,10 @@ def setup_logging(level=None, enable_file=False, module_name_mode=None):
         # 创建日志目录
         log_path = Path(LOG_DIR)
         log_path.mkdir(exist_ok=True)
-        
-        # 创建轮转文件处理器
-        log_file_path = log_path / LOG_FILE
+
+        # log_file_name 参数优先，否则使用模块级 LOG_FILE 常量
+        effective_log_file = log_file_name if log_file_name else LOG_FILE
+        log_file_path = log_path / effective_log_file
         file_handler = logging.handlers.RotatingFileHandler(
             filename=str(log_file_path),
             maxBytes=LOG_MAX_BYTES,

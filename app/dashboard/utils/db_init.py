@@ -165,6 +165,20 @@ def _migrate_ai_thoughts_urgency(conn) -> None:
         conn.execute("ALTER TABLE ai_thoughts ADD COLUMN urgency_level TEXT")
 
 
+def _migrate_bot_jid(conn) -> None:
+    """Add bot_jid column to chat_messages and ai_thoughts (idempotent)."""
+    msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()}
+    if "bot_jid" not in msg_cols:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN bot_jid TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_bot ON chat_messages(bot_jid)"
+        )
+
+    thought_cols = {row[1] for row in conn.execute("PRAGMA table_info(ai_thoughts)").fetchall()}
+    if "bot_jid" not in thought_cols:
+        conn.execute("ALTER TABLE ai_thoughts ADD COLUMN bot_jid TEXT")
+
+
 def _migrate_profile_overrides(conn) -> None:
     """Add manual-override and avatar columns to user_profiles if they don't exist (idempotent)."""
     existing = {row[1] for row in conn.execute("PRAGMA table_info(user_profiles)").fetchall()}
@@ -198,6 +212,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             cursor.execute(ddl)
 
         _migrate_ai_thoughts_urgency(conn)
+        _migrate_bot_jid(conn)
         _migrate_profile_overrides(conn)
         conn.commit()
         logger.info(f"Dashboard DB initialised at {db_path} (WAL mode)")

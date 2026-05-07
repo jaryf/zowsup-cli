@@ -78,7 +78,7 @@ class Main(ConsoleMain):
 
         if _HAS_STATUS:
             try:
-                write_status(running=True, jid=botId)
+                write_status(running=True, jid=botId, phone=botId)
             except Exception:
                 pass
 
@@ -135,7 +135,7 @@ if __name__ == "__main__":
 
     if _HAS_STATUS:
         try:
-            clear_status()
+            clear_status(phone=botId)
         except Exception:
             pass
 

@@ -383,8 +383,8 @@ class Utils:
             }
             level_name = level_map.get(level, 'INFO')
         
-        # 使用新的统一日志系统：启用文件输出
-        setup_logging(level=level_name, enable_file=True)
+        # 使用新的统一日志系统：启用文件输出，文件名取自 name 参数
+        setup_logging(level=level_name, enable_file=True, log_file_name=name)
         
         # 兼容性处理：为特定库设置日志级别为WARNING
         logging.getLogger('transitions').setLevel(logging.WARNING)

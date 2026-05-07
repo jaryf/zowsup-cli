@@ -62,16 +62,31 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
         <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           {msg.content}
         </Text>
-        <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
-          <SourceTag direction={msg.direction} />
-          {msg.direction === 'out' && msg.urgency_level && (
-            <UrgencyTag level={msg.urgency_level} />
-          )}
-          <Tooltip title={dayjs.unix(msg.timestamp).format('YYYY-MM-DD HH:mm:ss')}>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {dayjs.unix(msg.timestamp).format('HH:mm')}
-            </Text>
-          </Tooltip>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <SourceTag direction={msg.direction} />
+            {msg.direction === 'out' && msg.urgency_level && (
+              <UrgencyTag level={msg.urgency_level} />
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+            {msg.bot_jid && (
+              <Tooltip title={msg.bot_jid}>
+                <Tag
+                  icon={<RobotOutlined />}
+                  color="blue"
+                  style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '16px' }}
+                >
+                  {msg.bot_jid.replace(/@.*/, '')}
+                </Tag>
+              </Tooltip>
+            )}
+            <Tooltip title={dayjs.unix(msg.timestamp).format('YYYY-MM-DD HH:mm:ss')}>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {dayjs.unix(msg.timestamp).format('HH:mm')}
+              </Text>
+            </Tooltip>
+          </div>
         </div>
       </div>
     </div>

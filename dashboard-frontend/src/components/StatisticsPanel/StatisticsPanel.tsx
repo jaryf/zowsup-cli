@@ -17,6 +17,7 @@ const StatisticsPanel: React.FC = () => {
   const statsLoading = useDashboardStore((s) => s.statsLoading)
   const setStats = useDashboardStore((s) => s.setStats)
   const setStatsLoading = useDashboardStore((s) => s.setStatsLoading)
+  const activeBots = useDashboardStore((s) => s.activeBots)
 
   // Initial fetch (SSE hook will keep it updated afterwards)
   useEffect(() => {
@@ -79,7 +80,7 @@ const StatisticsPanel: React.FC = () => {
   return (
     <div style={{ padding: '0 8px' }}>
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={12} sm={6}>
+        <Col xs={8} sm={4}>
           <Card size="small">
             <Statistic
               title={t('stats.totalMessages')}
@@ -88,7 +89,7 @@ const StatisticsPanel: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col xs={12} sm={6}>
+        <Col xs={8} sm={4}>
           <Card size="small">
             <Statistic
               title={t('stats.activeUsers')}
@@ -97,7 +98,7 @@ const StatisticsPanel: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col xs={12} sm={6}>
+        <Col xs={8} sm={4}>
           <Card size="small">
             <Statistic
               title={t('stats.aiReplies')}
@@ -106,7 +107,7 @@ const StatisticsPanel: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col xs={12} sm={6}>
+        <Col xs={8} sm={4}>
           <Card size="small">
             <Statistic
               title={t('stats.todayMessages')}
@@ -116,7 +117,18 @@ const StatisticsPanel: React.FC = () => {
             />
           </Card>
         </Col>
+        <Col xs={8} sm={4}>
+          <Card size="small">
+            <Statistic
+              title={t('stats.onlineBots', '在线Bot')}
+              value={stats.online_bots ?? activeBots.filter((b) => b.running).length}
+              prefix={<RobotOutlined style={{ color: '#52c41a' }} />}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>        
       </Row>
+
 
       <Row gutter={[12, 12]}>
         <Col xs={24} sm={12}>

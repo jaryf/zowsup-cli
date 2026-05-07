@@ -39,6 +39,8 @@
     "botOnline": "Bot online",
     "botOnlineJid": "Bot online — {{jid}}",
     "botOffline": "Bot offline",
+    "botsRunning": "{{count}} bot(s) running",
+    "botsNone": "No bots running",
     "wsConnected": "WebSocket connected",
     "wsDisconnected": "WebSocket disconnected",
     "realtime": "Live",

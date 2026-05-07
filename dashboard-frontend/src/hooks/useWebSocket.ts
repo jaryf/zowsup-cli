@@ -14,6 +14,7 @@ import type { BotLogEntry } from '../store'
 export function useWebSocket(): void {
   const socketRef = useRef<Socket | null>(null)
   const selectedJid = useDashboardStore((s) => s.selectedJid)
+  const selectedLogBotId = useDashboardStore((s) => s.selectedLogBotId)
   const setWsConnected = useDashboardStore((s) => s.setWsConnected)
   const prependMessage = useDashboardStore((s) => s.prependMessage)
   const setProfile = useDashboardStore((s) => s.setProfile)
@@ -23,6 +24,22 @@ export function useWebSocket(): void {
   const updateContactAvatar = useDashboardStore((s) => s.updateContactAvatar)
   const appendBotLog = useDashboardStore((s) => s.appendBotLog)
   const appendBotLogs = useDashboardStore((s) => s.appendBotLogs)
+  const setActiveBots = useDashboardStore((s) => s.setActiveBots)
+
+  // Helper: fetch bot list from API and update store
+  const fetchBotList = async (token: string) => {
+    try {
+      const res = await fetch('/api/bot/list', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setActiveBots(data.bots ?? [])
+      }
+    } catch {
+      // non-fatal
+    }
+  }
 
   // Connect once on mount
   useEffect(() => {
@@ -38,7 +55,10 @@ export function useWebSocket(): void {
     socket.on('connect', () => {
       setWsConnected(true)
       // Subscribe to log room on every (re)connect
-      socket.emit('subscribe_logs')
+      const { selectedLogBotId: botId, apiToken } = useDashboardStore.getState()
+      socket.emit('subscribe_logs', botId ? { bot_id: botId } : {})
+      // Refresh bot list on connect
+      fetchBotList(apiToken)
     })
 
     socket.on('disconnect', () => {
@@ -77,7 +97,11 @@ export function useWebSocket(): void {
     })
 
     socket.on('bot_log', (entry: BotLogEntry) => {
-      appendBotLog(entry)
+      const { selectedLogBotId: botId } = useDashboardStore.getState()
+      // If a specific bot is selected, only show that bot's entries
+      if (!botId || entry.bot_id === botId) {
+        appendBotLog(entry)
+      }
     })
 
     socket.on('bot_log_snapshot', (entries: BotLogEntry[]) => {
@@ -101,4 +125,15 @@ export function useWebSocket(): void {
       socket.emit('subscribe_user', { jid: selectedJid })
     }
   }, [selectedJid])
+
+  // Re-subscribe to the correct log room whenever the selected bot changes
+  useEffect(() => {
+    const socket = socketRef.current
+    if (!socket || !socket.connected) return
+    // Unsubscribe from all log rooms first (no-op if not joined)
+    socket.emit('unsubscribe_logs', {})
+    socket.emit('unsubscribe_logs', selectedLogBotId ? { bot_id: selectedLogBotId } : {})
+    // Subscribe to the new selection
+    socket.emit('subscribe_logs', selectedLogBotId ? { bot_id: selectedLogBotId } : {})
+  }, [selectedLogBotId])
 }

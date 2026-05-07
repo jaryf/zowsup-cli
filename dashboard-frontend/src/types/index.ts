@@ -5,6 +5,7 @@
 export interface ChatMessage {
   id: number
   user_jid: string
+  bot_jid?: string | null
   direction: 'in' | 'out'
   content: string
   message_type: string
@@ -57,6 +58,7 @@ export interface Statistics {
   active_users: number
   ai_responses: number
   today_messages: number
+  online_bots?: number
 }
 
 export interface DailyStatistic {

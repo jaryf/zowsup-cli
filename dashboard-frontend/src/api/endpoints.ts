@@ -25,6 +25,7 @@ export interface ContactSummary {
   last_timestamp: number | null
   message_count: number
   avatar_url: string | null
+  bot_jid?: string | null
 }
 
 export async function fetchContacts(): Promise<ContactSummary[]> {
@@ -168,14 +169,14 @@ export async function postBotLoginLinkcode(
   return data
 }
 
-export async function postBotLogout(): Promise<{ ok: boolean; pid: number }> {
-  const { data } = await apiClient.post('/bot/logout')
+export async function postBotLogout(phone?: string): Promise<{ ok: boolean; pid: number }> {
+  const { data } = await apiClient.post('/bot/logout', phone ? { phone } : {})
   return data
 }
 
 export async function postBotStart(
   phone: string,
-): Promise<{ ok: boolean; pid: number }> {
+): Promise<{ ok: boolean; pid: number; already_running?: boolean }> {
   const { data } = await apiClient.post('/bot/start', { phone })
   return data
 }
@@ -188,6 +189,7 @@ export interface BotAccount {
   is_running: boolean
   is_failed: boolean
   failed_at: string | null
+  last_seen: string | null
 }
 
 export interface ImportResult {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { List, Input, Badge, Avatar, Typography, Spin, Empty } from 'antd'
-import { UserOutlined, SearchOutlined } from '@ant-design/icons'
+import { List, Input, Badge, Avatar, Typography, Spin, Empty, Tag, Tooltip } from 'antd'
+import { UserOutlined, SearchOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchChatHistory, fetchContacts, fetchContactAvatar, refreshContactAvatar } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
@@ -52,6 +52,7 @@ const ContactList: React.FC = () => {
               last_timestamp: c.last_timestamp,
               unread: 0,
               avatar_url: c.avatar_url ?? null,
+              bot_jid: c.bot_jid ?? null,
             })),
           )
         }
@@ -144,15 +145,28 @@ const ContactList: React.FC = () => {
                   </Text>
                 }
                 description={
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Text type="secondary" ellipsis style={{ fontSize: 12, maxWidth: 120 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <Text type="secondary" ellipsis style={{ fontSize: 12 }}>
                       {contact.last_message ?? '—'}
                     </Text>
-                    {contact.last_timestamp && (
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {dayjs.unix(contact.last_timestamp).format('HH:mm')}
-                      </Text>
-                    )}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
+                      {contact.bot_jid && (
+                        <Tooltip title={contact.bot_jid}>
+                          <Tag
+                            icon={<RobotOutlined />}
+                            color="blue"
+                            style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '16px' }}
+                          >
+                            {contact.bot_jid.replace(/@.*/, '')}
+                          </Tag>
+                        </Tooltip>
+                      )}
+                      {contact.last_timestamp && (
+                        <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                          {dayjs.unix(contact.last_timestamp).format('HH:mm')}
+                        </Text>
+                      )}
+                    </div>
                   </div>
                 }
               />

@@ -48,15 +48,17 @@ _monitor_thread: Optional[threading.Thread] = None
 _monitor_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
-# Bot log streaming — tail logs/zowsup.log and push to "logs" WebSocket room
+# Bot log streaming — per-bot tail of logs/<phone>.log
 # ---------------------------------------------------------------------------
 
-_LOG_MAX_BUFFER = 500  # ring buffer for late-joining clients
-_BOT_LOG_FILE = Path("logs") / "zowsup.log"
+_LOG_MAX_BUFFER = 500  # ring buffer entries kept per bot
+_LOGS_DIR = Path("logs")
 
-_log_buffer: list = []
-_log_buffer_lock = threading.Lock()
-_tail_thread: Optional[threading.Thread] = None
+# per-bot state  {bot_id: list}  /  {bot_id: Thread}
+_bot_log_buffers: dict = {}          # bot_id -> list[entry]
+_bot_log_buffers_lock = threading.Lock()
+_bot_tail_threads: dict = {}         # bot_id -> Thread
+_bot_tail_threads_lock = threading.Lock()
 
 # Matches lines written by ShortenedNameFormatter:
 # [2026-05-06 14:46:42] logger_name              INFO     [file.py:12] message
@@ -78,25 +80,29 @@ def _parse_log_line(line: str) -> Optional[dict]:
     }
 
 
-def _push_log_entry(entry: dict) -> None:
-    """Buffer and emit a single log entry."""
-    with _log_buffer_lock:
-        _log_buffer.append(entry)
-        if len(_log_buffer) > _LOG_MAX_BUFFER:
-            _log_buffer.pop(0)
+def _push_log_entry(entry: dict, bot_id: str) -> None:
+    """Buffer and emit a single log entry; entry gains a bot_id field."""
+    entry = {**entry, "bot_id": bot_id}
+    with _bot_log_buffers_lock:
+        buf = _bot_log_buffers.setdefault(bot_id, [])
+        buf.append(entry)
+        if len(buf) > _LOG_MAX_BUFFER:
+            buf.pop(0)
     if socketio is not None:
+        # broadcast to "logs" (all-bots subscribers) and "logs:<bot_id>" (single-bot subscribers)
         socketio.emit("bot_log", entry, room="logs")
+        socketio.emit("bot_log", entry, room=f"logs:{bot_id}")
 
 
-def _tail_log_file_loop() -> None:
+def _tail_log_file_loop(log_path: Path, bot_id: str) -> None:
     """
-    Background daemon: tail BOT_LOG_FILE and push new lines to the logs room.
-    Re-opens the file when it is rotated (size shrinks or inode changes).
+    Background daemon: tail a single bot's log file and push new lines.
+    Exits cleanly when the file is absent for >30 consecutive seconds.
     """
-    log_path = _BOT_LOG_FILE
     last_inode = None
     last_size = 0
     fh = None
+    absent_count = 0
 
     while True:
         time.sleep(0.5)
@@ -107,7 +113,14 @@ def _tail_log_file_loop() -> None:
                     fh = None
                 last_inode = None
                 last_size = 0
+                absent_count += 1
+                if absent_count > 60:  # ~30 s absent
+                    logger.debug("Log file gone, stopping tail thread for %s", bot_id)
+                    with _bot_tail_threads_lock:
+                        _bot_tail_threads.pop(bot_id, None)
+                    return
                 continue
+            absent_count = 0
 
             stat = log_path.stat()
             cur_inode = stat.st_ino if hasattr(stat, 'st_ino') else 0
@@ -118,7 +131,7 @@ def _tail_log_file_loop() -> None:
                 if fh:
                     fh.close()
                 fh = open(log_path, 'r', encoding='utf-8', errors='replace')
-                fh.seek(0, 2)  # seek to end — don't replay old logs on reconnect
+                fh.seek(0, 2)  # seek to end
                 last_inode = cur_inode
                 last_size = cur_size
                 continue
@@ -127,7 +140,7 @@ def _tail_log_file_loop() -> None:
             for raw in fh:
                 entry = _parse_log_line(raw)
                 if entry:
-                    _push_log_entry(entry)
+                    _push_log_entry(entry, bot_id)
             last_size = log_path.stat().st_size
         except Exception:
             if fh:
@@ -136,6 +149,37 @@ def _tail_log_file_loop() -> None:
                 except Exception:
                     pass
             fh = None
+
+
+def _ensure_tail_threads() -> None:
+    """Scan logs/*.log and start a tail thread for each bot log file not yet tracked."""
+    if not _LOGS_DIR.exists():
+        return
+    for log_file in _LOGS_DIR.glob("*.log"):
+        bot_id = log_file.stem
+        with _bot_tail_threads_lock:
+            existing = _bot_tail_threads.get(bot_id)
+            if existing and existing.is_alive():
+                continue
+            t = threading.Thread(
+                target=_tail_log_file_loop,
+                args=(log_file, bot_id),
+                daemon=True,
+                name=f"ws-log-tail-{bot_id}",
+            )
+            _bot_tail_threads[bot_id] = t
+            t.start()
+            logger.info("Log-tail thread started for bot %s", bot_id)
+
+
+def _bot_watcher_loop() -> None:
+    """Periodically scan for new bot log files and spin up tail threads."""
+    while True:
+        try:
+            _ensure_tail_threads()
+        except Exception:
+            pass
+        time.sleep(5)
 
 
 # ---------------------------------------------------------------------------
@@ -185,18 +229,37 @@ def _register_events(sio: "SocketIO") -> None:
         logger.debug("WebSocket client disconnected")
 
     @sio.on("subscribe_logs")
-    def on_subscribe_logs():
-        join_room("logs")
-        # Send buffered entries so the client gets history immediately
-        with _log_buffer_lock:
-            snapshot = list(_log_buffer)
-        sio.emit("bot_log_snapshot", snapshot)
-        logger.debug("WS client subscribed to logs room")
+    def on_subscribe_logs(data=None):
+        """
+        Subscribe to bot log events.
+        data: {"bot_id": "phone_number"} or empty/None for all bots.
+        """
+        bot_id = ((data or {}).get("bot_id") or "").strip() if isinstance(data, dict) else ""
+        if bot_id:
+            join_room(f"logs:{bot_id}")
+            with _bot_log_buffers_lock:
+                snapshot = list(_bot_log_buffers.get(bot_id, []))
+            sio.emit("bot_log_snapshot", snapshot)
+            logger.debug("WS client subscribed to logs for bot %s", bot_id)
+        else:
+            join_room("logs")
+            with _bot_log_buffers_lock:
+                # Merge all buffers sorted by ts
+                all_entries = []
+                for buf in _bot_log_buffers.values():
+                    all_entries.extend(buf)
+            all_entries.sort(key=lambda e: e.get("ts", ""))
+            sio.emit("bot_log_snapshot", all_entries[-_LOG_MAX_BUFFER:])
+            logger.debug("WS client subscribed to all-bots logs room")
 
     @sio.on("unsubscribe_logs")
-    def on_unsubscribe_logs():
-        leave_room("logs")
-        logger.debug("WS client unsubscribed from logs room")
+    def on_unsubscribe_logs(data=None):
+        bot_id = ((data or {}).get("bot_id") or "").strip() if isinstance(data, dict) else ""
+        if bot_id:
+            leave_room(f"logs:{bot_id}")
+        else:
+            leave_room("logs")
+        logger.debug("WS client unsubscribed from logs (bot_id=%s)", bot_id or "all")
 
     @sio.on("subscribe_user")
     def on_subscribe_user(data):
@@ -222,7 +285,7 @@ def start_monitor_thread(db_path: str) -> None:
     Start the background thread that polls for new chat_messages and emits
     new_message WebSocket events.  Idempotent — safe to call multiple times.
     """
-    global _monitor_thread, _tail_thread
+    global _monitor_thread
     if os.environ.get("TESTING") or os.environ.get("PYTEST_CURRENT_TEST"):
         return
     with _monitor_lock:
@@ -236,14 +299,22 @@ def start_monitor_thread(db_path: str) -> None:
             _monitor_thread.start()
             logger.info("WebSocket DB-monitor thread started (poll interval: 2 s)")
 
-        if not (_tail_thread and _tail_thread.is_alive()):
-            _tail_thread = threading.Thread(
-                target=_tail_log_file_loop,
+        # Start the bot-log watcher (scans for new *.log files periodically)
+        _watcher_running = any(
+            t.name == "ws-bot-watcher" and t.is_alive()
+            for t in threading.enumerate()
+        )
+        if not _watcher_running:
+            watcher = threading.Thread(
+                target=_bot_watcher_loop,
                 daemon=True,
-                name="ws-log-tail",
+                name="ws-bot-watcher",
             )
-            _tail_thread.start()
-            logger.info("WebSocket log-tail thread started (file: %s)", _BOT_LOG_FILE)
+            watcher.start()
+            logger.info("WebSocket bot-log watcher thread started")
+
+        # Immediately scan once so existing log files are tailed right away
+        _ensure_tail_threads()
 
 
 def _monitor_loop(db_path: str) -> None:
@@ -280,7 +351,7 @@ def _fetch_new_messages(db_path: str, after_id: int) -> list:
     conn = sqlite3.connect(db_path, timeout=5)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT id, user_jid, direction, content, message_type, timestamp "
+        "SELECT id, user_jid, bot_jid, direction, content, message_type, timestamp "
         "FROM chat_messages WHERE id > ? ORDER BY id ASC LIMIT 50",
         (after_id,),
     ).fetchall()
@@ -303,6 +374,7 @@ def emit_new_message(msg: dict) -> None:
         "message": {
             "id": msg["id"],
             "user_jid": jid,
+            "bot_jid": msg.get("bot_jid"),
             "direction": msg["direction"],
             "content": msg["content"],
             "message_type": msg.get("message_type", "text"),
