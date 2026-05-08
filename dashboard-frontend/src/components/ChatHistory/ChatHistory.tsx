@@ -116,9 +116,9 @@ function SourceTag({ direction }: { direction: 'in' | 'out' }) {
 }
 
 function MessageItem({ msg }: { msg: ChatMessage }) {
-  // Strip JID suffix for display (e.g. "85291234567@s.whatsapp.net" → "85291234567")
-  const participantLabel = msg.participant
-    ? msg.participant.replace(/@.*$/, '')
+  // Prefer resolved_jid (real JID resolved from LID) over raw participant
+  const participantLabel = (msg.resolved_jid || msg.participant)
+    ? (msg.resolved_jid || msg.participant)!.replace(/@.*$/, '')
     : null
 
   return (

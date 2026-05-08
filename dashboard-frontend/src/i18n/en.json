@@ -52,6 +52,7 @@
     "contacts": "Sessions",
     "chatHistory": "Chat History",
     "userProfile": "User Profile",
+    "groupInfo": "Group Info",
     "statistics": "Statistics"
   },
   "contactList": {
@@ -273,5 +274,21 @@
   "langSwitcher": {
     "en": "EN",
     "zh": "中文"
+  },
+  "groupInfo": {
+    "groupId": "Group ID",
+    "messageCount": "Messages",
+    "firstSeen": "First Activity",
+    "lastSeen": "Last Activity",
+    "syncedAt": "Members Synced",
+    "members": "Members",
+    "memberJid": "Member",
+    "memberRole": "Role",
+    "memberName": "Display Name",
+    "memberMsgs": "Msgs",
+    "memberLast": "Last Active",
+    "roleAdmin": "Admin",
+    "fromHistory": "from history",
+    "noMembers": "No member activity recorded"
   }
 }

@@ -51,6 +51,7 @@
     "contacts": "会话列表",
     "chatHistory": "聊天记录",
     "userProfile": "用户画像",
+    "groupInfo": "群组信息",
     "statistics": "统计数据"
   },
   "contactList": {
@@ -273,5 +274,21 @@
   "langSwitcher": {
     "en": "EN",
     "zh": "中文"
+  },
+  "groupInfo": {
+    "groupId": "群组 ID",
+    "messageCount": "消息数",
+    "firstSeen": "首次活跃",
+    "lastSeen": "最近活跃",
+    "syncedAt": "成员同步时间",
+    "members": "群成员",
+    "memberJid": "成员",
+    "memberRole": "角色",
+    "memberName": "显示名称",
+    "memberMsgs": "消息数",
+    "memberLast": "最近活跃",
+    "roleAdmin": "群主",
+    "fromHistory": "来自历史记录",
+    "noMembers": "暂无成员活跃记录"
   }
 }

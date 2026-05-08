@@ -133,6 +133,54 @@ def save_display_name(jid: str, name: str, db_path: str) -> None:
         conn.close()
 
 
+def save_group_members(
+    group_jid: str,
+    participants: dict,
+    db_path: str,
+    participant_lids: dict = None,
+) -> None:
+    """
+    Persist the full member list returned by ``group.info`` into the
+    ``group_members`` table.
+
+    *participants* is the dict ``{jid: role}`` from
+    ``InfoGroupsResultIqProtocolEntity.participants``.
+
+    *participant_lids* is an optional ``{jid: lid}`` dict mapping each
+    participant key to its LID address (e.g. ``xxx@lid``).  Stored in
+    ``participant_lid`` so that incoming LID-addressed messages can be
+    matched back to the correct row.
+
+    Uses UPSERT: refreshes role / synced_at; never overwrites last_seen;
+    updates participant_lid only when a new non-NULL value is provided.
+    """
+    if not participants:
+        return
+    now = int(time.time())
+    lids = participant_lids or {}
+    conn = sqlite3.connect(db_path)
+    try:
+        for participant_jid, role in participants.items():
+            if not participant_jid:
+                continue
+            lid = lids.get(participant_jid) or None
+            conn.execute(
+                """
+                INSERT INTO group_members (group_jid, participant_jid, role, synced_at, participant_lid)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(group_jid, participant_jid)
+                DO UPDATE SET
+                    role            = excluded.role,
+                    synced_at       = excluded.synced_at,
+                    participant_lid = COALESCE(excluded.participant_lid, participant_lid)
+                """,
+                (group_jid, participant_jid, role, now, lid),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def notify_avatar_updated(jid: str, url: str) -> None:
     """
     Write a {jid, url} entry to ``data/avatar_updates.json`` so the Flask

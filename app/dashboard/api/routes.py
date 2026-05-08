@@ -345,9 +345,11 @@ def chat_history():
 
         rows = conn.execute(
             "SELECT cm.id, cm.user_jid, cm.bot_jid, cm.direction, cm.content, cm.message_type, "
-            "       cm.timestamp, cm.created_at, cm.participant, cm.notify, cm.media_path, at.urgency_level "
+            "       cm.timestamp, cm.created_at, cm.participant, cm.notify, cm.media_path, at.urgency_level, "
+            "       gm.participant_jid AS resolved_jid "
             "FROM chat_messages cm "
             "LEFT JOIN ai_thoughts at ON at.message_id = cm.id "
+            "LEFT JOIN group_members gm ON gm.group_jid = cm.user_jid AND gm.participant_lid = cm.participant "
             "WHERE cm.user_jid = ? "
             "ORDER BY cm.timestamp DESC "
             "LIMIT ? OFFSET ?",
@@ -803,6 +805,152 @@ def strategy_conflicts():
         return jsonify({"error": str(e)}), 500
 
     return jsonify({"jid": jid, "conflicts": conflicts}), 200
+
+
+# ---------------------------------------------------------------------------
+# GET /api/group-info  — basic info + member list for a group JID
+# ---------------------------------------------------------------------------
+
+@bp.route("/group-info", methods=["GET"])
+def group_info():
+    """
+    Return basic info and member list for a group JID.
+
+    Member list is sourced from the ``group_members`` table (populated by
+    the bot's avatar-poll task when it calls ``group.info``).  If the table
+    has no rows yet for this group, falls back to distinct participants
+    observed in ``chat_messages``.
+
+    Query params:
+        jid  (required) — must end with @g.us
+
+    Response:
+      {
+        "jid": "...",
+        "display_name": "...",
+        "avatar_url": "...",
+        "message_count": 42,
+        "first_seen": 1700000000,
+        "last_seen": 1700001000,
+        "synced_at": 1700001000 | null,
+        "members": [
+          {
+            "participant": "...",
+            "role": "admin" | null,
+            "notify": "...",
+            "msg_count": 5,
+            "last_seen": 1700000999
+          },
+          ...
+        ]
+      }
+    """
+    jid = request.args.get("jid", "").strip()
+    if not jid:
+        return jsonify({"error": "jid is required"}), 400
+    if not jid.endswith("@g.us"):
+        return jsonify({"error": "jid must be a group JID ending with @g.us"}), 400
+
+    db_path = current_app.config["DASHBOARD_DB_PATH"]
+    with get_db_connection(db_path) as conn:
+        # Basic aggregated stats from chat history
+        stats_row = conn.execute(
+            "SELECT COUNT(*) AS message_count, "
+            "       MIN(timestamp) AS first_seen, "
+            "       MAX(timestamp) AS last_seen "
+            "FROM chat_messages WHERE user_jid = ?",
+            (jid,),
+        ).fetchone()
+
+        # Profile info (display_name, avatar_url) from user_profiles if stored
+        profile_row = conn.execute(
+            "SELECT display_name, avatar_url FROM user_profiles WHERE user_jid = ?",
+            (jid,),
+        ).fetchone()
+
+        # ── Member list: prefer group_members (real data from group.info) ──
+        gm_rows = conn.execute(
+            """
+            SELECT
+                gm.participant_jid  AS participant,
+                gm.participant_lid,
+                gm.role,
+                gm.synced_at,
+                gm.last_seen,
+                -- latest notify seen in chat_messages for this member
+                -- COALESCE handles LID-mode groups (participant stored as @lid)
+                (
+                    SELECT cm.notify
+                    FROM   chat_messages cm
+                    WHERE  cm.user_jid   = ?
+                      AND  cm.participant = COALESCE(gm.participant_lid, gm.participant_jid)
+                      AND  cm.notify IS NOT NULL
+                    ORDER  BY cm.timestamp DESC
+                    LIMIT  1
+                ) AS notify,
+                -- message count in this group
+                (
+                    SELECT COUNT(*)
+                    FROM   chat_messages cm
+                    WHERE  cm.user_jid   = ?
+                      AND  cm.participant = COALESCE(gm.participant_lid, gm.participant_jid)
+                ) AS msg_count
+            FROM group_members gm
+            WHERE gm.group_jid = ?
+            ORDER BY
+                CASE WHEN gm.role = 'admin' THEN 0 ELSE 1 END,
+                msg_count DESC
+            """,
+            (jid, jid, jid),
+        ).fetchall()
+
+        synced_at = None
+        if gm_rows:
+            synced_at = max((r["synced_at"] for r in gm_rows), default=None)
+            members = [dict(r) for r in gm_rows]
+            # drop internal columns that are not needed per-member
+            for m in members:
+                m.pop("synced_at", None)
+                m.pop("participant_lid", None)
+                m.pop("msg_count", None)
+        else:
+            # Fallback: derive members from chat_messages participants
+            fallback_rows = conn.execute(
+                """
+                SELECT
+                    cm.participant,
+                    NULL AS role,
+                    (
+                        SELECT cm2.notify
+                        FROM   chat_messages cm2
+                        WHERE  cm2.user_jid   = cm.user_jid
+                          AND  cm2.participant = cm.participant
+                          AND  cm2.notify IS NOT NULL
+                        ORDER  BY cm2.timestamp DESC
+                        LIMIT  1
+                    ) AS notify,
+                    COUNT(*)          AS msg_count,
+                    MAX(cm.timestamp) AS last_seen
+                FROM chat_messages cm
+                WHERE cm.user_jid = ?
+                  AND cm.participant IS NOT NULL
+                GROUP BY cm.participant
+                ORDER BY msg_count DESC
+                """,
+                (jid,),
+            ).fetchall()
+            members = [dict(r) for r in fallback_rows]
+
+    return jsonify({
+        "jid": jid,
+        "display_name": profile_row["display_name"] if profile_row else None,
+        "avatar_url": profile_row["avatar_url"] if profile_row else None,
+        "message_count": stats_row["message_count"] if stats_row else 0,
+        "first_seen": stats_row["first_seen"] if stats_row else None,
+        "last_seen": stats_row["last_seen"] if stats_row else None,
+        "synced_at": synced_at,
+        "members": members,
+    }), 200
 
 
 # ---------------------------------------------------------------------------

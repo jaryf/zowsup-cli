@@ -35,6 +35,8 @@ class InfoGroupsResultIqProtocolEntity(ResultIqProtocolEntity):
         self.subjectTime = int(subjectTime)
         self.subjectOwnerJid = subjectOwnerJid
         self.participants = participants
+        # {participant_key: lid_address} — populated by fromProtocolTreeNode
+        self.participant_lids: dict = {}
 
     def getParticipants(self) -> Any:
         return self.participants
@@ -102,15 +104,34 @@ class InfoGroupsResultIqProtocolEntity(ResultIqProtocolEntity):
     def fromProtocolTreeNode(node):
         groupNode = node.getChild("group")
         participants = {}
+        participant_lids = {}  # {participant_key: lid_address e.g. 'xxx@lid'}
 
-        valueName = "jid"
-        if groupNode.getAttributeValue("addressing_mode")=="lid":
-            valueName = "phone_number"
-            
-        for p in groupNode.getAllChildren("participant"):
-            participants[p[valueName]] = p["type"]
-        return InfoGroupsResultIqProtocolEntity(
+        addressing_mode = groupNode.getAttributeValue("addressing_mode")
+        if addressing_mode == "lid":
+            # LID mode: phone_number = regular JID (key), jid = LID address
+            for p in groupNode.getAllChildren("participant"):
+                key = p["phone_number"]
+                if not key:
+                    continue
+                participants[key] = p["type"]
+                lid = p["jid"]
+                if lid:
+                    participant_lids[key] = lid
+        else:
+            # Normal mode: jid = regular JID (key), lid attribute may exist
+            for p in groupNode.getAllChildren("participant"):
+                key = p["jid"]
+                if not key:
+                    continue
+                participants[key] = p["type"]
+                lid = p["lid"] if p["lid"] else None
+                if lid:
+                    participant_lids[key] = lid
+
+        entity = InfoGroupsResultIqProtocolEntity(
             node["id"], node["from"],
             groupNode["id"], groupNode["creation"], groupNode["creator"], groupNode["subject"],
             groupNode["s_t"], groupNode["s_o"], participants
         )
+        entity.participant_lids = participant_lids
+        return entity

@@ -121,6 +121,19 @@ CREATE TABLE IF NOT EXISTS daily_statistics (
 );
 """
 
+_DDL_GROUP_MEMBERS = """
+CREATE TABLE IF NOT EXISTS group_members (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_jid       TEXT    NOT NULL,
+    participant_jid TEXT    NOT NULL,
+    role            TEXT,                          -- 'admin' | NULL (regular member)
+    synced_at       INTEGER NOT NULL,              -- Unix epoch seconds
+    last_seen       INTEGER,                       -- Unix epoch of last observed message
+    participant_lid TEXT,                          -- LID address (xxx@lid) for LID-mode groups
+    UNIQUE(group_jid, participant_jid)
+);
+"""
+
 # ---------------------------------------------------------------------------
 # Indexes DDL
 # ---------------------------------------------------------------------------
@@ -151,6 +164,7 @@ _ALL_DDL = [
     _DDL_STRATEGY_APPLICATIONS,
     _DDL_STRATEGY_CONFLICTS,
     _DDL_DAILY_STATISTICS,
+    _DDL_GROUP_MEMBERS,
 ] + _INDEXES
 
 
@@ -210,6 +224,32 @@ def _migrate_notify(conn) -> None:
         conn.execute("ALTER TABLE chat_messages ADD COLUMN notify TEXT")
 
 
+def _migrate_group_members_index(conn) -> None:
+    """Add index on group_members(group_jid) if it doesn't exist (idempotent)."""
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_group_members_gid ON group_members(group_jid)"
+    )
+
+
+def _migrate_group_members_last_seen(conn) -> None:
+    """Add last_seen column to group_members if it doesn't exist (idempotent)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(group_members)").fetchall()}
+    if "last_seen" not in existing:
+        conn.execute("ALTER TABLE group_members ADD COLUMN last_seen INTEGER")
+        logger.info("Migrated group_members: added last_seen column")
+
+
+def _migrate_group_members_participant_lid(conn) -> None:
+    """Add participant_lid column + index to group_members if missing (idempotent)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(group_members)").fetchall()}
+    if "participant_lid" not in existing:
+        conn.execute("ALTER TABLE group_members ADD COLUMN participant_lid TEXT")
+        logger.info("Migrated group_members: added participant_lid column")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_group_members_lid ON group_members(participant_lid)"
+    )
+
+
 def init_db(db_path: str = DB_PATH) -> None:
     """
     Create tables, indexes, and enable WAL mode.
@@ -234,6 +274,9 @@ def init_db(db_path: str = DB_PATH) -> None:
         _migrate_profile_overrides(conn)
         _migrate_participant(conn)
         _migrate_notify(conn)
+        _migrate_group_members_index(conn)
+        _migrate_group_members_last_seen(conn)
+        _migrate_group_members_participant_lid(conn)
         conn.commit()
         logger.info(f"Dashboard DB initialised at {db_path} (WAL mode)")
     except Exception:

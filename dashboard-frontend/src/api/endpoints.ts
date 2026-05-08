@@ -8,6 +8,7 @@ import type {
   StrategyHistoryResponse,
   StrategyConflictsResponse,
   StrategyConfig,
+  GroupInfo,
 } from '../types'
 
 // ---- Health ----
@@ -233,5 +234,12 @@ export async function exportBotAccounts(
   phones: string[],
 ): Promise<{ lines: string[]; errors: { phone: string; error: string }[] }> {
   const { data } = await apiClient.post('/bot/export', { phones })
+  return data
+}
+
+// ---- Group Info ----
+
+export async function fetchGroupInfo(jid: string): Promise<GroupInfo> {
+  const { data } = await apiClient.get('/group-info', { params: { jid } })
   return data
 }

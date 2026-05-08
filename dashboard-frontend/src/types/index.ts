@@ -13,6 +13,7 @@ export interface ChatMessage {
   created_at: string
   urgency_level?: string | null
   participant?: string | null
+  resolved_jid?: string | null
   notify?: string | null
   media_path?: string | null
 }
@@ -101,6 +102,25 @@ export interface StrategyConflict {
   description: string | null
   resolved: 0 | 1
   created_at: string
+}
+
+export interface GroupMember {
+  participant: string
+  role: 'admin' | null
+  notify: string | null
+  msg_count: number
+  last_seen: number | null
+}
+
+export interface GroupInfo {
+  jid: string
+  display_name: string | null
+  avatar_url: string | null
+  message_count: number
+  first_seen: number | null
+  last_seen: number | null
+  synced_at: number | null
+  members: GroupMember[]
 }
 
 // ---- API response wrappers ----

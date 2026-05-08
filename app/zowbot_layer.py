@@ -168,6 +168,16 @@ async def _avatar_poll_task(layer, poll_interval: int = 15):
                                 name = name.encode("latin-1").decode("utf-8")
                             except (UnicodeEncodeError, UnicodeDecodeError):
                                 pass  # already valid Unicode
+                        # ── Group members + roles ──────────────────────────
+                        try:
+                            participants = (info or {}).get("participants") or {}
+                            participant_lids = (info or {}).get("participant_lids") or {}
+                            if participants:
+                                from app.dashboard.utils.avatar_queue import save_group_members
+                                save_group_members(jid, participants, db_path, participant_lids)
+                                logger.debug("Group members cached for %s (%d members)", jid, len(participants))
+                        except Exception as me:
+                            logger.debug("Group member save failed for %s: %s", jid, me)
                     else:
                         # Individual: get push name from contact.getprofile
                         profile_result = await layer.executeCommand(
@@ -1273,6 +1283,42 @@ class ZowBotLayer(YowInterfaceLayer):
         except Exception as exc:
             self.logger.warning(f"dashboard direct save failed: {exc}")
 
+    def _update_group_member_last_seen(self, group_jid: str, participant: str) -> None:
+        """
+        Stamp group_members.last_seen for the participant who just sent a message.
+
+        In LID-mode groups the incoming participant identifier ends with ``@lid``
+        (e.g. ``38097098133757@lid``).  In that case we match against the stored
+        ``participant_lid`` column.  For normal groups we match ``participant_jid``.
+        """
+        db_path = self._dashboard_db_path
+        if not db_path or not participant:
+            return
+        try:
+            import sqlite3 as _sqlite3
+            import time as _time
+            now = int(_time.time())
+            conn = _sqlite3.connect(db_path, timeout=5)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                if participant.endswith("@lid"):
+                    conn.execute(
+                        "UPDATE group_members SET last_seen = ? "
+                        "WHERE group_jid = ? AND participant_lid = ?",
+                        (now, group_jid, participant),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE group_members SET last_seen = ? "
+                        "WHERE group_jid = ? AND participant_jid = ?",
+                        (now, group_jid, participant),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            self.logger.debug("group_members last_seen update failed: %s", exc)
+
     def _parse_jid_and_lid(self, messageProtocolEntity):
         """
         Parse and extract JID and LID from messageProtocolEntity.
@@ -1453,6 +1499,9 @@ class ZowBotLayer(YowInterfaceLayer):
                 except Exception as dl_exc:
                     self.logger.warning("Media download failed for %s: %s", jid, dl_exc)
             self._save_msg_to_dashboard(jid, direction, text, message_type=db_message_type, participant=participant, notify=notify, media_path=media_path)
+            # Update last_seen for group messages (participant is the sender's JID or LID)
+            if participant and jid.endswith("@g.us"):
+                self._update_group_member_last_seen(jid, participant)
 
         # AI auto-reply processing (Phase 1.5: real API mode with message sending)
         if self.ai_service:

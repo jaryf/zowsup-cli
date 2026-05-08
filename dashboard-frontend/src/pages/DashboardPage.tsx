@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next'
 import ContactList from '../components/ContactList/ContactList'
 import ChatHistory from '../components/ChatHistory/ChatHistory'
 import UserProfile from '../components/UserProfile/UserProfile'
+import GroupInfo from '../components/GroupInfo/GroupInfo'
 import StatisticsPanel from '../components/StatisticsPanel/StatisticsPanel'
+import { useDashboardStore } from '../store'
 
 /**
  * Main Dashboard page.
@@ -19,6 +21,8 @@ import StatisticsPanel from '../components/StatisticsPanel/StatisticsPanel'
  */
 const DashboardPage: React.FC = () => {
   const { t } = useTranslation()
+  const selectedJid = useDashboardStore((s) => s.selectedJid)
+  const isGroup = selectedJid?.endsWith('@g.us') ?? false
   return (
     <div style={{ padding: 16, height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* Top row — 3 columns */}
@@ -45,14 +49,14 @@ const DashboardPage: React.FC = () => {
           </Card>
         </Col>
 
-        <Col flex="280px">
+        <Col flex="420px">
           <Card
             size="small"
-            title={t('dashboard.userProfile')}
+            title={isGroup ? t('dashboard.groupInfo') : t('dashboard.userProfile')}
             bodyStyle={{ height: 'calc(60vh - 100px)', overflow: 'auto', padding: 0 }}
             style={{ height: '100%' }}
           >
-            <UserProfile />
+            {isGroup ? <GroupInfo jid={selectedJid!} /> : <UserProfile />}
           </Card>
         </Col>
       </Row>

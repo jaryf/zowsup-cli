@@ -23,7 +23,8 @@ class Cmd_Group_Info(BotCommand):
             return self.success(
                 groupId = result.groupId,
                 subject = result.subject,
-                participants = result.participants
+                participants = result.participants,
+                participant_lids = result.participant_lids,
             )
 
         except Exception as e:
