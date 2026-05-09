@@ -23,6 +23,8 @@ import json
 import logging
 import os
 import pathlib
+import re
+import time
 import urllib.request
 import urllib.parse
 from threading import Lock
@@ -133,6 +135,7 @@ _ALLOWED_CONFIG_KEYS = {
     "openai_key", "openai_api_url", "openai_model",
     "glm_key", "glm_model",
     "qwen_key", "qwen_model",
+    "google_enabled",
 }
 
 @translation_bp.route("/config", methods=["POST"])
@@ -293,7 +296,7 @@ def _do_translate(
     error_message is None on success.
     """
     providers_to_try: list[str] = (
-        ["libretranslate", "deepl", "openai", "glm", "qwen"]
+        ["google", "libretranslate", "deepl", "openai", "glm", "qwen"]
         if provider == "auto"
         else [provider]
     )
@@ -309,12 +312,14 @@ def _do_translate(
     return (
         None,
         "none",
-        "No translation provider configured. Set one of: LIBRETRANSLATE_URL, DEEPL_API_KEY, OPENAI_API_KEY, GLM_API_KEY, QWEN_API_KEY.",
+        "No translation provider configured. Set one of: LIBRETRANSLATE_URL, DEEPL_API_KEY, OPENAI_API_KEY, GLM_API_KEY, QWEN_API_KEY, or enable Google.",
     )
 
 
 def _call_provider(provider: str, text: str, from_lang: str, to_lang: str) -> str | None:
     """Call a specific provider. Returns translated text or None if not configured."""
+    if provider == "google":
+        return _google_translate(text, from_lang, to_lang)
     if provider == "libretranslate":
         return _libretranslate(text, from_lang, to_lang)
     if provider == "deepl":
@@ -503,3 +508,87 @@ def _qwen_translate(text: str, from_lang: str, to_lang: str) -> str | None:
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
         result = json.loads(resp.read())
     return result["choices"][0]["message"]["content"].strip()
+
+
+# ---------------------------------------------------------------------------
+# Google Translate  (no API key required)
+# ---------------------------------------------------------------------------
+
+# Pre-compiled regexes matching the HTML spans in Google's async translate page
+_GT_TEXT_RE = re.compile(r'id="tw-answ-target-text">([^<]+)</span>')
+
+_GT_PA_URL = "https://translate-pa.googleapis.com/v1/translateHtml"
+_GT_PA_KEY = "AIzaSyATBXajvzQLTDHEQbcpq0Ihe0vWDHmO520"
+_GT_ASYNC_BASE = "https://www.google.com/async/translate?"
+_GT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/144.0.0.0 Safari/537.36"
+)
+
+
+def _google_translate(text: str, from_lang: str, to_lang: str) -> str | None:
+    """Google Translate — tries the translate-pa JSON API first, falls back to async HTML scrape."""
+    # Normalise language codes for Google (e.g. "zh" → "zh-CN")
+    _GL = {"zh": "zh-CN", "zh-tw": "zh-TW"}
+    g_to = _GL.get(to_lang.lower(), to_lang)
+    g_from = _GL.get(from_lang.lower(), from_lang) if from_lang not in ("auto", "") else "auto"
+
+    result = _google_pa(text, g_from, g_to)
+    if result is not None:
+        return result
+    # Fallback: async HTML scrape
+    return _google_async(text, g_from, g_to)
+
+
+def _google_pa(text: str, from_lang: str, to_lang: str) -> str | None:
+    """translate-pa.googleapis.com — JSON+protobuf payload, returns structured JSON."""
+    payload = json.dumps([
+        [[text], from_lang, to_lang],
+        "wt_lib",
+    ]).encode()
+    req = urllib.request.Request(
+        _GT_PA_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json+protobuf",
+            "X-Goog-Api-Key": _GT_PA_KEY,
+            "User-Agent": _GT_UA,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:  # noqa: S310
+            body = json.loads(resp.read())
+        # Response shape: [[translated_text, ...], [detected_lang, ...]]
+        if isinstance(body, list) and len(body) >= 1 and body[0]:
+            return body[0][0]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Google PA API failed: %s", exc)
+    return None
+
+
+def _google_async(text: str, from_lang: str, to_lang: str) -> str | None:
+    """Fallback: Google async HTML translate endpoint, parsed with regex."""
+    async_val = (
+        f"sl:{from_lang},tl:{to_lang},st:{urllib.parse.quote(text)},"
+        f"id:{int(time.time() * 1000)},qc:true,ac:true,"
+        "_id:tw-async-translate,_pms:s,_fmt:pc"
+    )
+    params = urllib.parse.urlencode({"async": async_val})
+    req = urllib.request.Request(
+        _GT_ASYNC_BASE + params,
+        headers={
+            "Accept-Charset": "utf-8",
+            "User-Agent": _GT_UA,
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            body = resp.read().decode("utf-8", errors="replace")
+        m = _GT_TEXT_RE.search(body)
+        return m.group(1) if m else None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Google async scrape failed: %s", exc)
+    return None

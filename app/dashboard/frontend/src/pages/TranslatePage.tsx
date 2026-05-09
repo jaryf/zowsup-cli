@@ -123,7 +123,8 @@ const TranslatePage: React.FC = () => {
       await apiClient.post('/translation/config', values)
       setTranslationTargetLang(values.target_lang)
       message.success(t('translate.saved'))
-      setTestResult(null)
+      setTestOutput('')
+      setTestError('')
     } catch {
       message.error(t('translate.saveFailed'))
     } finally {
@@ -274,6 +275,7 @@ const TranslatePage: React.FC = () => {
                 <Select
                   options={[
                     { label: t('translate.providerAuto'), value: 'auto' },
+                    { label: 'Google Translate', value: 'google' },
                     { label: 'LibreTranslate', value: 'libretranslate' },
                     { label: 'DeepL', value: 'deepl' },
                     { label: 'OpenAI / Compatible', value: 'openai' },
@@ -290,6 +292,17 @@ const TranslatePage: React.FC = () => {
             </Col>
           </Row>
           <Alert type="info" showIcon style={{ marginTop: 0 }} message={t('translate.globalHint')} />
+        </Card>
+
+        <Card
+          title="Google Translate"
+          style={{ marginBottom: 16 }}
+          size="small"
+          extra={<Text type="secondary" style={{ fontSize: 12 }}>{t('translate.freeNoKey')}</Text>}
+        >
+          <Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 0 }}>
+            {t('translate.googleDesc')}
+          </Paragraph>
         </Card>
 
         <Card

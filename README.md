@@ -205,7 +205,8 @@ The dashboard is gated by the `DASHBOARD_MODE` environment variable.
 ### Features
 
 - **Contact list** — avatars, unread badges, last-message preview, real-time updates
-- **Chat history** — per-contact conversation view with AI "thoughts" panel
+- **Chat history** — per-contact conversation view with AI "thoughts" panel; translated messages show translated text first with original below
+- **Translation** — per-conversation toggle; auto-translates incoming messages via configurable provider; results persisted to DB
 - **Bot management** — account list, one-click start, live startup log stream, import/export 6-segment backups, failure marking and batch delete
 - **Strategy management** — global and per-user AI reply strategies, history table, one-click toggle/rollback
 - **Real-time push** — WebSocket (Socket.IO) + SSE; no polling
@@ -220,6 +221,28 @@ The dashboard is gated by the `DASHBOARD_MODE` environment variable.
 | Mark / unmark failed | Manual toggle, or auto-set on permanent ban (403/401) |
 | Batch delete failed | One click removes all failure-marked account directories |
 
+### Translation
+
+The dashboard includes a built-in message translation service. Configure it at **Settings → Translation**.
+
+**Providers** (tried in order when set to *Auto*):
+| Provider | Required config |
+|---|---|
+| LibreTranslate | `LIBRETRANSLATE_URL` (self-hosted or public instance) |
+| DeepL | `DEEPL_API_KEY` |
+| OpenAI / Compatible | `OPENAI_API_KEY`, optional `OPENAI_API_URL` + model |
+| GLM (Zhipu AI) | `GLM_API_KEY`, optional model (default `glm-4-flash`) |
+| Qwen (通义千问) | `QWEN_API_KEY`, optional model (default `qwen-turbo`) |
+
+**How it works:**
+1. Enable the toggle on any contact — the switch appears at the bottom-left of each contact row.
+2. Every new incoming text message is automatically translated using the configured provider.
+3. If the translated text differs from the original, the bubble shows the translation first and the original below as `原文：…`.
+4. Translation results are stored in the `translated_content` column of `chat_messages` in the SQLite database, so they survive page refreshes and are available for audit.
+5. Toggle state and target language are persisted in browser `localStorage`.
+
+Provider config is saved to `data/translation_config.json` (excluded from git). You can also set values via environment variables (`DEEPL_API_KEY`, `OPENAI_API_KEY`, `GLM_API_KEY`, `QWEN_API_KEY`, etc.).
+
 ### Selected API endpoints
 
 | Method | Path | Description |
@@ -232,6 +255,12 @@ The dashboard is gated by the `DASHBOARD_MODE` environment variable.
 | `DELETE` | `/api/bot/accounts` | Batch-delete all failed accounts |
 | `PATCH` | `/api/strategy/<id>/toggle` | Toggle strategy active state |
 | `DELETE` | `/api/strategy/<id>` | Delete strategy row |
+| `GET` | `/api/translation/config` | Get translation provider config |
+| `POST` | `/api/translation/config` | Save translation provider config |
+| `POST` | `/api/translation/translate` | Translate a piece of text |
+| `PATCH` | `/api/translation/message/<id>` | Persist translation result to DB |
+| `GET` | `/api/translation/settings/<jid>` | Get per-conversation translation settings |
+| `POST` | `/api/translation/settings/<jid>` | Save per-conversation translation settings |
 
 Full spec: `docs/openapi.yaml`
 
