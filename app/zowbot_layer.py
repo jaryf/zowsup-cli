@@ -194,6 +194,71 @@ async def _avatar_poll_task(layer, poll_interval: int = 15):
         logger.debug("Avatar poll task cancelled")
 
 
+async def _send_queue_poll_task(layer, poll_interval: int = 3):
+    """
+    Background asyncio task that processes outgoing message requests
+    queued by the dashboard via ``data/send_queue.json``.
+
+    Every *poll_interval* seconds this task reads and clears the queue,
+    then dispatches each task to the appropriate bot command
+    (``msg.send`` for text, ``msg.sendmedia`` for media).
+    """
+    try:
+        if not _db.db_path:
+            logger.debug("Send queue poll task: no dashboard DB configured, exiting")
+            return
+
+        logger.debug("Send queue poll task started (interval=%ds)", poll_interval)
+        while True:
+            await asyncio.sleep(poll_interval)
+            try:
+                from app.dashboard.utils.send_queue import dequeue_send_tasks, write_send_result
+                # Only dequeue tasks destined for THIS bot (or wildcard tasks)
+                bot_id = layer.bot.botId or ""
+                tasks = dequeue_send_tasks(bot_jid=bot_id)
+            except Exception as exc:
+                logger.debug("Send queue read failed: %s", exc)
+                continue
+
+            for task in tasks:
+                task_id  = task.get("id", "?")
+                to_jid   = task.get("to_jid", "")
+                mtype    = (task.get("message_type") or "text").lower()
+                content  = task.get("content") or ""
+                media_url = task.get("media_url")
+                caption   = task.get("caption")
+                try:
+                    if mtype == "text":
+                        if not content:
+                            raise ValueError("text message has empty content")
+                        await layer.executeCommand("msg.send", [to_jid, content])
+                        layer._save_msg_to_dashboard(
+                            user_jid=to_jid, direction="out",
+                            content=content, message_type="text",
+                            source="manual",
+                        )
+                    else:
+                        if not media_url:
+                            raise ValueError(f"{mtype} message has no media_url")
+                        # params: [to, media_url, type, caption_or_empty]
+                        params = [to_jid, media_url, mtype]
+                        if caption:
+                            params.append(caption)
+                        await layer.executeCommand("msg.sendmedia", params)
+                        layer._save_msg_to_dashboard(
+                            user_jid=to_jid, direction="out",
+                            content=caption or media_url, message_type=mtype,
+                            source="manual",
+                        )
+                    write_send_result(task_id, success=True)
+                    logger.info("Send queue: task %s sent to %s (%s)", task_id, to_jid, mtype)
+                except Exception as exc:
+                    write_send_result(task_id, success=False, detail=str(exc))
+                    logger.warning("Send queue: task %s failed: %s", task_id, exc)
+    except asyncio.CancelledError:
+        logger.debug("Send queue poll task cancelled")
+
+
 class ZowBotLayer(YowInterfaceLayer):
 
     PROP_MESSAGES = "org.openwhatsapp.zowsup.prop.sendclient.queue"
@@ -985,6 +1050,15 @@ class ZowBotLayer(YowInterfaceLayer):
             except Exception as exc:
                 self.logger.debug("Could not schedule avatar poll task: %s", exc)
 
+        # Start send-queue polling background task (dashboard outgoing messages)
+        if getattr(self, "_sendQueueTask", None) is None or self._sendQueueTask.done():
+            try:
+                loop = asyncio.get_event_loop()
+                self._sendQueueTask = loop.create_task(_send_queue_poll_task(self))
+                self.logger.debug("Send queue poll task scheduled")
+            except Exception as exc:
+                self.logger.debug("Could not schedule send queue poll task: %s", exc)
+
         self.bot.lastOnlineTime = int(time.time()) 
 
         self.loginFailCount = 0
@@ -1223,6 +1297,7 @@ class ZowBotLayer(YowInterfaceLayer):
         message_type: str = "text", participant: str | None = None,
         notify: str | None = None,
         media_path: str | None = None,
+        source: str | None = None,
     ) -> None:
         """
         Write a single chat message row to dashboard.db.
@@ -1231,6 +1306,7 @@ class ZowBotLayer(YowInterfaceLayer):
         participant: for group messages, the JID of the individual sender.
         notify: display name (pushname) of the sender.
         media_path: absolute local path to a downloaded media file.
+        source: 'ai' for AI-generated replies, 'manual' for human-operator sends, None for incoming.
         """
         db_path = self._dashboard_db_path
         if not db_path or not content:
@@ -1243,9 +1319,9 @@ class ZowBotLayer(YowInterfaceLayer):
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute(
                     "INSERT INTO chat_messages "
-                    "(user_jid, direction, content, message_type, timestamp, bot_jid, participant, notify, media_path) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (user_jid, direction, content, message_type, int(_time.time()), self.bot.botId, participant, notify, media_path),
+                    "(user_jid, direction, content, message_type, timestamp, bot_jid, participant, notify, media_path, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (user_jid, direction, content, message_type, int(_time.time()), self.bot.botId, participant, notify, media_path, source),
                 )
                 conn.commit()
             finally:

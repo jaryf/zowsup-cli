@@ -18,6 +18,8 @@ export interface ChatMessage {
   media_path?: string | null
   /** Auto-translated content, set client-side when translation toggle is on. */
   translated_content?: string | null
+  /** 'ai' = AI-generated reply, 'manual' = sent by human operator, null = incoming */
+  source?: string | null
 }
 
 export interface AIThought {

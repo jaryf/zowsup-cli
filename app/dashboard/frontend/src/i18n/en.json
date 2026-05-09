@@ -66,11 +66,29 @@
     "loading": "Loading...",
     "empty": "No messages",
     "user": "User",
+    "manual": "Manual",
     "originalText": "Original: ",
     "urgency": {
       "high": "Urgent",
       "medium": "Soon",
       "low": "Low priority"
+    },
+    "composer": {
+      "placeholder": "Type a message...",
+      "send": "Send",
+      "sending": "Sending...",
+      "mediaUrl": "Media URL",
+      "mediaUrlPlaceholder": "Paste image / video / audio / document URL",
+      "caption": "Caption (optional)",
+      "captionPlaceholder": "Add a caption for the media",
+      "typeText": "Text",
+      "typeImage": "Image",
+      "typeVideo": "Video",
+      "typeAudio": "Audio",
+      "typeDocument": "Document",
+      "successMsg": "Message queued successfully",
+      "errorMsg": "Send failed: {{error}}",
+      "noBotWarning": "No bot is currently online. The message will be sent once a bot comes online."
     }
   },
   "stats": {

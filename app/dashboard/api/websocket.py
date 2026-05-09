@@ -351,7 +351,7 @@ def _fetch_new_messages(db_path: str, after_id: int) -> list:
     conn = sqlite3.connect(db_path, timeout=5)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT id, user_jid, bot_jid, direction, content, message_type, timestamp, participant, notify, media_path "
+        "SELECT id, user_jid, bot_jid, direction, content, message_type, timestamp, participant, notify, media_path, source "
         "FROM chat_messages WHERE id > ? ORDER BY id ASC LIMIT 50",
         (after_id,),
     ).fetchall()
@@ -383,6 +383,7 @@ def emit_new_message(msg: dict) -> None:
             "participant": msg.get("participant"),
             "notify": msg.get("notify"),
             "media_path": msg.get("media_path"),
+            "source": msg.get("source"),
         },
     }
     # Emit to the per-user room (subscribers see it) AND global (for contact-list updates)

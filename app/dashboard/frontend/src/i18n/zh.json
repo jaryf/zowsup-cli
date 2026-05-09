@@ -66,11 +66,29 @@
     "loading": "加载中...",
     "empty": "暂无聊天记录",
     "user": "用户",
+    "manual": "人工",
     "originalText": "原文：",
     "urgency": {
       "high": "紧急",
       "medium": "较急",
       "low": "不急"
+    },
+    "composer": {
+      "placeholder": "输入消息...",
+      "send": "发送",
+      "sending": "发送中...",
+      "mediaUrl": "媒体链接（URL）",
+      "mediaUrlPlaceholder": "粘贴图片/视频/音频/文件链接",
+      "caption": "说明文字（可选）",
+      "captionPlaceholder": "为媒体添加描述",
+      "typeText": "文本",
+      "typeImage": "图片",
+      "typeVideo": "视频",
+      "typeAudio": "音频",
+      "typeDocument": "文件",
+      "successMsg": "消息已发送到队列",
+      "errorMsg": "发送失败：{{error}}",
+      "noBotWarning": "当前没有在线的 Bot，消息将在 Bot 上线后发送"
     }
   },
   "stats": {

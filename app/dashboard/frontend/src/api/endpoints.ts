@@ -244,3 +244,19 @@ export async function fetchGroupInfo(jid: string): Promise<GroupInfo> {
   const { data } = await apiClient.get('/group-info', { params: { jid } })
   return data
 }
+
+// ---- Send Message ----
+
+export interface SendMessageParams {
+  to_jid: string
+  message_type: 'text' | 'image' | 'video' | 'audio' | 'document'
+  content?: string
+  bot_jid?: string | null
+  media_url?: string
+  caption?: string
+}
+
+export async function sendMessage(params: SendMessageParams): Promise<{ ok: boolean; task_id: string }> {
+  const { data } = await apiClient.post('/send-message', params)
+  return data
+}

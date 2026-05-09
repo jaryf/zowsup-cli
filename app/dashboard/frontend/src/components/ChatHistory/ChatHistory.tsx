@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Typography, Tag, Spin, Empty, Pagination, Tooltip, Image } from 'antd'
-import { RobotOutlined, UserOutlined, AlertOutlined, FileOutlined, AudioOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import { Typography, Tag, Spin, Empty, Pagination, Tooltip, Image, Input, Button, Select, message as antdMessage } from 'antd'
+import { RobotOutlined, UserOutlined, AlertOutlined, FileOutlined, AudioOutlined, VideoCameraOutlined, SendOutlined, PaperClipOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { fetchChatHistory } from '../../api/endpoints'
+import { fetchChatHistory, sendMessage } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
 import { useTranslation } from 'react-i18next'
 import type { ChatMessage } from '../../types'
 
 const { Text } = Typography
+const { TextArea } = Input
 
 const _URGENCY_COLOR: Record<string, string> = {
   high: 'red',
@@ -106,12 +107,22 @@ function UrgencyTag({ level }: { level: string }) {
   )
 }
 
-function SourceTag({ direction }: { direction: 'in' | 'out' }) {
+function SourceTag({ direction, source }: { direction: 'in' | 'out'; source?: string | null }) {
   const { t } = useTranslation()
-  return direction === 'out' ? (
-    <Tag color="green" icon={<RobotOutlined />} style={{ margin: 0, fontSize: 11 }}>AI</Tag>
-  ) : (
-    <Tag icon={<UserOutlined />} style={{ margin: 0, fontSize: 11, color: '#888', borderColor: '#d9d9d9', background: '#fafafa' }}>{t('chatHistory.user')}</Tag>
+  if (direction === 'out') {
+    if (source === 'manual') {
+      return (
+        <Tag color="orange" icon={<UserOutlined />} style={{ margin: 0, fontSize: 11 }}>
+          {t('chatHistory.manual')}
+        </Tag>
+      )
+    }
+    return <Tag color="green" icon={<RobotOutlined />} style={{ margin: 0, fontSize: 11 }}>AI</Tag>
+  }
+  return (
+    <Tag icon={<UserOutlined />} style={{ margin: 0, fontSize: 11, color: '#888', borderColor: '#d9d9d9', background: '#fafafa' }}>
+      {t('chatHistory.user')}
+    </Tag>
   )
 }
 
@@ -205,7 +216,7 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 4 }}>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <SourceTag direction={msg.direction} />
+            <SourceTag direction={msg.direction} source={msg.source} />
             {msg.direction === 'out' && msg.urgency_level && (
               <UrgencyTag level={msg.urgency_level} />
             )}
@@ -236,9 +247,139 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
 
 const PAGE_SIZE = 50
 
+type MsgType = 'text' | 'image' | 'video' | 'audio' | 'document'
+
+function MessageComposer({ toJid, botJid }: { toJid: string; botJid?: string | null }) {
+  const { t } = useTranslation()
+  const [msgType, setMsgType] = useState<MsgType>('text')
+  const [content, setContent] = useState('')
+  const [mediaUrl, setMediaUrl] = useState('')
+  const [caption, setCaption] = useState('')
+  const [sending, setSending] = useState(false)
+  const [messageApi, contextHolder] = antdMessage.useMessage()
+
+  const typeOptions: { value: MsgType; label: string }[] = [
+    { value: 'text',     label: t('chatHistory.composer.typeText') },
+    { value: 'image',    label: t('chatHistory.composer.typeImage') },
+    { value: 'video',    label: t('chatHistory.composer.typeVideo') },
+    { value: 'audio',    label: t('chatHistory.composer.typeAudio') },
+    { value: 'document', label: t('chatHistory.composer.typeDocument') },
+  ]
+
+  async function handleSend() {
+    const isText = msgType === 'text'
+    if (isText && !content.trim()) return
+    if (!isText && !mediaUrl.trim()) return
+
+    setSending(true)
+    try {
+      await sendMessage({
+        to_jid: toJid,
+        message_type: msgType,
+        content: content.trim(),
+        bot_jid: botJid || null,
+        media_url: !isText ? mediaUrl.trim() : undefined,
+        caption: !isText && caption.trim() ? caption.trim() : undefined,
+      })
+      messageApi.success(t('chatHistory.composer.successMsg'))
+      setContent('')
+      setMediaUrl('')
+      setCaption('')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      messageApi.error(t('chatHistory.composer.errorMsg', { error: msg }))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      void handleSend()
+    }
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid #f0f0f0', padding: '10px 16px', background: '#fafafa' }}>
+      {contextHolder}
+      <div style={{ display: 'flex', gap: 8, marginBottom: msgType !== 'text' ? 8 : 0 }}>
+        {/* Message type selector */}
+        <Select<MsgType>
+          value={msgType}
+          onChange={setMsgType}
+          options={typeOptions}
+          size="small"
+          style={{ width: 90, flexShrink: 0 }}
+          suffixIcon={msgType !== 'text' ? <PaperClipOutlined /> : undefined}
+        />
+
+        {msgType === 'text' ? (
+          /* Text mode: textarea + send button inline */
+          <>
+            <TextArea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={`${t('chatHistory.composer.placeholder')} (Ctrl+Enter)`}
+              autoSize={{ minRows: 1, maxRows: 5 }}
+              style={{ flex: 1, resize: 'none' }}
+              disabled={sending}
+            />
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              onClick={handleSend}
+              loading={sending}
+              disabled={!content.trim()}
+              style={{ flexShrink: 0 }}
+            >
+              {sending ? t('chatHistory.composer.sending') : t('chatHistory.composer.send')}
+            </Button>
+          </>
+        ) : (
+          /* Media mode: URL input */
+          <Input
+            value={mediaUrl}
+            onChange={(e) => setMediaUrl(e.target.value)}
+            placeholder={t('chatHistory.composer.mediaUrlPlaceholder')}
+            style={{ flex: 1 }}
+            disabled={sending}
+          />
+        )}
+      </div>
+
+      {/* Media: caption row + send button */}
+      {msgType !== 'text' && (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Input
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            placeholder={t('chatHistory.composer.captionPlaceholder')}
+            style={{ flex: 1 }}
+            disabled={sending}
+            onPressEnter={handleSend}
+          />
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={handleSend}
+            loading={sending}
+            disabled={!mediaUrl.trim()}
+            style={{ flexShrink: 0 }}
+          >
+            {sending ? t('chatHistory.composer.sending') : t('chatHistory.composer.send')}
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const ChatHistory: React.FC = () => {
   const { t } = useTranslation()
   const selectedJid = useDashboardStore((s) => s.selectedJid)
+  const contacts = useDashboardStore((s) => s.contacts)
   const messages = useDashboardStore((s) => s.messages)
   const messagesPage = useDashboardStore((s) => s.messagesPage)
   const messagesTotal = useDashboardStore((s) => s.messagesTotal)
@@ -294,22 +435,6 @@ const ChatHistory: React.FC = () => {
     )
   }
 
-  if (messagesLoading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <Spin tip={t('chatHistory.loading')} />
-      </div>
-    )
-  }
-
-  if (messages.length === 0) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <Empty description={t('chatHistory.empty')} />
-      </div>
-    )
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/*
@@ -323,35 +448,45 @@ const ChatHistory: React.FC = () => {
            so they appear oldest→newest top→bottom after the double-flip.
         Result: no scroll-jump on message load or live push.
       */}
-      <div
-        ref={scrollRef}
-        tabIndex={0}
-        style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', transform: 'scaleY(-1)', outline: 'none' }}
-        onKeyDown={(e) => {
-          // PageUp/PageDown and arrow keys are also inverted by scaleY(-1); reverse them.
-          const el = e.currentTarget
-          const pageAmount = el.clientHeight * 0.9
-          if (e.key === 'PageUp') {
-            e.preventDefault()
-            el.scrollTop += pageAmount
-          } else if (e.key === 'PageDown') {
-            e.preventDefault()
-            el.scrollTop -= pageAmount
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault()
-            el.scrollTop += 60
-          } else if (e.key === 'ArrowDown') {
-            e.preventDefault()
-            el.scrollTop -= 60
-          }
-        }}
-      >
-        {messages.map((msg) => (
-          <div key={msg.id} style={{ transform: 'scaleY(-1)' }}>
-            <MessageItem msg={msg} />
-          </div>
-        ))}
-      </div>
+      {messagesLoading ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Spin tip={t('chatHistory.loading')} />
+        </div>
+      ) : messages.length === 0 ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Empty description={t('chatHistory.empty')} />
+        </div>
+      ) : (
+        <div
+          ref={scrollRef}
+          tabIndex={0}
+          style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', transform: 'scaleY(-1)', outline: 'none' }}
+          onKeyDown={(e) => {
+            // PageUp/PageDown and arrow keys are also inverted by scaleY(-1); reverse them.
+            const el = e.currentTarget
+            const pageAmount = el.clientHeight * 0.9
+            if (e.key === 'PageUp') {
+              e.preventDefault()
+              el.scrollTop += pageAmount
+            } else if (e.key === 'PageDown') {
+              e.preventDefault()
+              el.scrollTop -= pageAmount
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              el.scrollTop += 60
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              el.scrollTop -= 60
+            }
+          }}
+        >
+          {messages.map((msg) => (
+            <div key={msg.id} style={{ transform: 'scaleY(-1)' }}>
+              <MessageItem msg={msg} />
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ padding: '8px 16px', borderTop: '1px solid #f0f0f0', textAlign: 'right' }}>
         <Pagination
           current={messagesPage}
@@ -363,6 +498,7 @@ const ChatHistory: React.FC = () => {
           showSizeChanger={false}
         />
       </div>
+      <MessageComposer toJid={selectedJid} botJid={contacts.find((c) => c.jid === selectedJid)?.bot_jid} />
     </div>
   )
 }

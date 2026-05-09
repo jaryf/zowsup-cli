@@ -367,7 +367,7 @@ def chat_history():
         rows = conn.execute(
             "SELECT cm.id, cm.user_jid, cm.bot_jid, cm.direction, cm.content, cm.message_type, "
             "       cm.timestamp, cm.created_at, cm.participant, cm.notify, cm.media_path, at.urgency_level, "
-            "       cm.translated_content, "
+            "       cm.translated_content, cm.source, "
             "       gm.participant_jid AS resolved_jid "
             "FROM chat_messages cm "
             "LEFT JOIN ai_thoughts at ON at.message_id = cm.id "
@@ -976,6 +976,82 @@ def group_info():
         "synced_at": synced_at,
         "members": members,
     }), 200
+
+
+# ---------------------------------------------------------------------------
+# POST /api/send-message  — enqueue an outgoing message via bot
+# ---------------------------------------------------------------------------
+
+_ALLOWED_MSG_TYPES = {"text", "image", "video", "audio", "document"}
+
+
+@bp.route("/send-message", methods=["POST"])
+@limiter.limit("60/minute")
+def send_message():
+    """
+    Enqueue a message to be sent by the bot.
+
+    Body JSON (multipart or JSON):
+        to_jid        (required)  Recipient JID
+        message_type  (required)  "text" | "image" | "video" | "audio" | "document"
+        content       (required for text)  Text body
+        bot_jid       (optional)  Sending bot JID; auto-selected if omitted
+        caption       (optional)  Caption for media messages
+
+    For media messages, the file must be uploaded in a separate step or
+    provided as a URL via the ``media_url`` field.
+
+    Response:
+        {"ok": true, "task_id": "<uuid>"}
+    """
+    body = request.get_json(silent=True) or {}
+    to_jid       = (body.get("to_jid") or "").strip()
+    message_type = (body.get("message_type") or "text").strip().lower()
+    content      = (body.get("content") or "").strip()
+    bot_jid      = (body.get("bot_jid") or "").strip() or None
+    media_url    = (body.get("media_url") or "").strip() or None
+    caption      = (body.get("caption") or "").strip() or None
+
+    if not to_jid:
+        return jsonify({"error": "to_jid is required"}), 400
+    if message_type not in _ALLOWED_MSG_TYPES:
+        return jsonify({"error": f"message_type must be one of {sorted(_ALLOWED_MSG_TYPES)}"}), 400
+    if message_type == "text" and not content:
+        return jsonify({"error": "content is required for text messages"}), 400
+    if message_type != "text" and not media_url:
+        return jsonify({"error": "media_url is required for non-text messages"}), 400
+
+    # Auto-select bot_jid from the last incoming message for this conversation
+    if not bot_jid:
+        try:
+            db_path = current_app.config["DASHBOARD_DB_PATH"]
+            with get_db_connection(db_path) as conn:
+                row = conn.execute(
+                    "SELECT bot_jid FROM chat_messages "
+                    "WHERE user_jid = ? AND direction = 'in' AND bot_jid IS NOT NULL "
+                    "ORDER BY timestamp DESC LIMIT 1",
+                    (to_jid,),
+                ).fetchone()
+            if row:
+                bot_jid = row[0]
+        except Exception as exc:
+            logger.warning("Could not auto-select bot_jid for %s: %s", to_jid, exc)
+
+    try:
+        from app.dashboard.utils.send_queue import enqueue_send_task
+        task_id = enqueue_send_task(
+            to_jid=to_jid,
+            message_type=message_type,
+            content=content,
+            bot_jid=bot_jid,
+            media_url=media_url,
+            caption=caption,
+        )
+    except Exception as exc:
+        logger.exception("Failed to enqueue send task")
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({"ok": True, "task_id": task_id}), 202
 
 
 # ---------------------------------------------------------------------------
