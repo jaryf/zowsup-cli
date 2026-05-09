@@ -12,6 +12,6 @@ data/backups/
 .git/
 .gitignore
 .env
-dashboard-frontend/node_modules/
-dashboard-frontend/.vite/
-dashboard-frontend/dist/
+app/dashboard/frontend/node_modules/
+app/dashboard/frontend/.vite/
+app/dashboard/frontend/dist/

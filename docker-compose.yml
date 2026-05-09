@@ -43,7 +43,7 @@ services:
   # ── Frontend Nginx ─────────────────────────────────────────
   frontend:
     build:
-      context: ./dashboard-frontend
+      context: ./app/dashboard/frontend
       dockerfile: Dockerfile.frontend
     image: zowsup-dashboard-frontend:latest
     container_name: zowsup-frontend

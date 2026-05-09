@@ -2,7 +2,7 @@
  * E2E tests — 7.2 Contact list interaction
  *
  * Covers DASHBOARD_TODO.md item 7.2.
- * Requires both `npm run dev` (port 5173) and `python run_dashboard.py` (port 5000).
+ * Requires both `npm run dev` (port 5173) and `python script/dashboard.py` (port 5000).
  */
 import { test, expect } from '@playwright/test'
 

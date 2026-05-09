@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Avatar,
   Button,
@@ -78,18 +78,26 @@ const GroupInfo: React.FC<Props> = ({ jid }) => {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [rowLoading, setRowLoading] = useState<Record<number, boolean>>({})
 
+  // Track which jid we last did a full load for, so revision bumps don't flash
+  const loadedJidRef = useRef<string | null>(null)
+
   const STYLE_OPTIONS = STYLE_OPTIONS_STATIC.map((o) => ({ ...o, label: t(`strategyOpts.${o.value}`) }))
   const TONE_OPTIONS = TONE_OPTIONS_STATIC.map((o) => ({ ...o, label: t(`strategyOpts.${o.value}`) }))
   const LANG_OPTIONS = LANG_OPTIONS_STATIC.map((o) => ({ ...o, label: t(`strategyOpts.${o.value}`) }))
 
   useEffect(() => {
     if (!jid) return
-    setLoading(true)
-    setInfo(null)
+    const isJidChange = loadedJidRef.current !== jid
+    loadedJidRef.current = jid
+    if (isJidChange) {
+      // Full reset only when switching to a different group
+      setLoading(true)
+      setInfo(null)
+    }
     fetchGroupInfo(jid)
       .then(setInfo)
-      .catch(() => setInfo(null))
-      .finally(() => setLoading(false))
+      .catch(() => { if (isJidChange) setInfo(null) })
+      .finally(() => { if (isJidChange) setLoading(false) })
     loadPersonalHistory(jid)
   }, [jid, groupInfoRevision]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -392,8 +400,7 @@ const GroupInfo: React.FC<Props> = ({ jid }) => {
           dataSource={sortedMembers}
           columns={columns}
           rowKey="participant"
-          pagination={false}
-          scroll={{ y: 300 }}
+          pagination={false}          
           style={{ fontSize: 12 }}
         />
       )}

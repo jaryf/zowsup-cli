@@ -74,6 +74,7 @@ from common.utils import Utils
 from conf.constants import SysVar
 from .zowbot_values import ZowBotStatus, ZowBotType
 from .ai_module.satisfaction import SatisfactionPlugin
+from app.dashboard.bridge import dashboard as _db
 
 logger = logging.getLogger(__name__)
 
@@ -131,24 +132,21 @@ async def _avatar_poll_task(layer, poll_interval: int = 15):
     runs until the asyncio event loop is stopped.
     """
     try:
-        from app.dashboard.utils.avatar_queue import dequeue_avatar_requests, save_avatar_url, save_display_name
-        from app.dashboard.config import CONFIG as DASHBOARD_CONFIG
-        db_path = DASHBOARD_CONFIG.get("DASHBOARD_DB_PATH")
-        if not db_path:
-            logger.warning("Avatar poll task: DASHBOARD_DB_PATH not configured, exiting")
+        if not _db.db_path:
+            logger.warning("Avatar poll task: DASHBOARD_MODE not set or DASHBOARD_DB_PATH not configured, exiting")
             return
 
         logger.debug("Avatar poll task started (interval=%ds)", poll_interval)
         while True:
             await asyncio.sleep(poll_interval)
-            jids = dequeue_avatar_requests()
+            jids = _db.dequeue_avatar_requests()
             for jid in jids:
                 # ── Avatar ──────────────────────────────────────────────────
                 try:
                     result = await layer.executeCommand("contact.getavatar", [jid])
                     url = (result or {}).get("url")
                     if url:
-                        save_avatar_url(jid, url, db_path)
+                        _db.save_avatar_url(jid, url)
                         logger.debug("Avatar cached for %s", jid)
                     else:
                         logger.debug("No avatar URL returned for %s (result=%s)", jid, result)
@@ -173,8 +171,7 @@ async def _avatar_poll_task(layer, poll_interval: int = 15):
                             participants = (info or {}).get("participants") or {}
                             participant_lids = (info or {}).get("participant_lids") or {}
                             if participants:
-                                from app.dashboard.utils.avatar_queue import save_group_members
-                                save_group_members(jid, participants, db_path, participant_lids)
+                                _db.save_group_members(jid, participants, participant_lids)
                                 logger.debug("Group members cached for %s (%d members)", jid, len(participants))
                         except Exception as me:
                             logger.debug("Group member save failed for %s: %s", jid, me)
@@ -189,7 +186,7 @@ async def _avatar_poll_task(layer, poll_interval: int = 15):
                         entry = profiles.get(jid, {})
                         name = entry.get("name") or entry.get("pushName") or ""
                     if name:
-                        save_display_name(jid, name, db_path)
+                        _db.save_display_name(jid, name)
                         logger.debug("Display name cached for %s: %s", jid, name)
                 except Exception as e:
                     logger.debug("Display name fetch failed for %s: %s", jid, e)
@@ -669,16 +666,13 @@ class ZowBotLayer(YowInterfaceLayer):
                 # Proactively re-fetch and cache the new avatar in the dashboard DB
                 async def _refresh_avatar(jid: str) -> None:
                     try:
-                        from app.dashboard.utils.avatar_queue import save_avatar_url, notify_avatar_updated
-                        from app.dashboard.config import CONFIG as DASHBOARD_CONFIG
-                        db_path = DASHBOARD_CONFIG.get("DASHBOARD_DB_PATH")
-                        if not db_path:
+                        if not _db.db_path:
                             return
                         result = await self.executeCommand("contact.getavatar", [jid])
                         url = (result or {}).get("url")
                         if url:
-                            save_avatar_url(jid, url, db_path)
-                            notify_avatar_updated(jid, url)
+                            _db.save_avatar_url(jid, url)
+                            _db.notify_avatar_updated(jid, url)
                             self.logger.debug("Avatar refreshed for %s after SetPicture notification", jid)
                     except Exception as _exc:
                         self.logger.debug("Avatar refresh failed for %s: %s", jid, _exc)
@@ -833,18 +827,9 @@ class ZowBotLayer(YowInterfaceLayer):
             if entity.reason != "405" and self.bot.bot_type != ZowBotType.TYPE_RUN_TEMP:
                 # Permanent ban / unauthorized — mark offline immediately so the
                 # dashboard doesn't keep showing the bot as running.
-                try:
-                    from app.dashboard.utils.bot_status import clear_status
-                    clear_status()
-                except Exception:
-                    pass
+                _db.clear_status()
                 # Record this account as permanently failed in the dashboard.
-                try:
-                    from app.dashboard.api.bot_control import mark_phone_failed
-                    if self.bot.botId:
-                        mark_phone_failed(self.bot.botId)
-                except Exception:
-                    pass
+                _db.mark_phone_failed(self.bot.botId)
                 # Quit the bot process now; no point staying connected.
                 self.bot.quit()
 
@@ -1024,11 +1009,7 @@ class ZowBotLayer(YowInterfaceLayer):
                     self.logger.debug("🔇 AI module disabled in config")
                     self.ai_service = None
                     # Still wire up dashboard DB path so messages are persisted
-                    try:
-                        from app.dashboard.config import CONFIG as DASHBOARD_CONFIG
-                        self._dashboard_db_path = DASHBOARD_CONFIG.get("DASHBOARD_DB_PATH")
-                    except Exception:
-                        pass
+                    self._dashboard_db_path = _db.db_path
                     return
                 
                 self.ai_service = AIService(
@@ -1036,17 +1017,10 @@ class ZowBotLayer(YowInterfaceLayer):
                     config=ai_config
                 )
                 # Phase 2: Wire up dashboard db for AI thought recording
-                try:
-                    from app.dashboard.config import CONFIG as DASHBOARD_CONFIG
-                    _db_path = DASHBOARD_CONFIG.get("DASHBOARD_DB_PATH")
-                    self.ai_service.dashboard_db_path = _db_path
-                    self._dashboard_db_path = _db_path  # also set on layer for direct saves
-                    # Phase 3: Wire up strategy manager
-                    if _db_path:
-                        from app.dashboard.strategy.strategy_manager import StrategyManager
-                        self.ai_service.strategy_manager = StrategyManager(_db_path)
-                except Exception:
-                    pass  # Dashboard not configured — analytics silently disabled
+                self.ai_service.dashboard_db_path = _db.db_path
+                self._dashboard_db_path = _db.db_path  # also set on layer for direct saves
+                # Phase 3: Wire up strategy manager
+                self.ai_service.strategy_manager = _db.get_strategy_manager()
                 
                 # Set up send response callback for retry manager
                 self.ai_service.set_send_response_callback(self._ai_send_response)

@@ -197,7 +197,7 @@ def refresh_token():
     return jsonify({
         "new_token": new_token,
         "instructions": (
-            "Set DASHBOARD_API_TOKEN=<new_token> and restart run_dashboard.py "
+            "Set DASHBOARD_API_TOKEN=<new_token> and restart script/dashboard.py "
             "to activate the new token."
         ),
     }), 200

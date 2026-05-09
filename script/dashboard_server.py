@@ -1,8 +1,7 @@
-"""
-Dashboard server entry-point.
+"""Dashboard server entry-point.
 
 Run as a completely separate process from the bot:
-    python run_dashboard.py
+    python script/dashboard_server.py
 
 Environment variables (all optional):
     DASHBOARD_HOST       bind address  (default: 0.0.0.0)
@@ -24,7 +23,7 @@ from pathlib import Path
 # Make sure the project root is on sys.path so `app.dashboard.*` resolves
 # regardless of the working directory the user starts from.
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 

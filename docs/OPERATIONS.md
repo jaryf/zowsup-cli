@@ -6,7 +6,10 @@
 
 ```bash
 # Direct
-python run_dashboard.py
+python script/dashboard.py
+
+# Or start both frontend + backend
+python script/start.py
 
 # Docker
 docker compose up -d
@@ -129,7 +132,7 @@ curl -X POST http://localhost:5000/api/auth/refresh \
 
 ```bash
 # Linux
-ps aux | grep run_dashboard
+ps aux | grep script/dashboard
 # or
 curl -sf http://localhost:5000/api/health && echo "UP" || echo "DOWN"
 ```

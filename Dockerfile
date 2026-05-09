@@ -39,7 +39,7 @@ COPY --from=builder /install /usr/local
 COPY app/       app/
 COPY conf/      conf/
 COPY proto/     proto/
-COPY run_dashboard.py .
+COPY script/    script/
 
 # Create runtime directories
 RUN mkdir -p data logs
@@ -62,4 +62,4 @@ ENV DASHBOARD_HOST=0.0.0.0 \
     DASHBOARD_DEBUG=false \
     LOG_LEVEL=INFO
 
-ENTRYPOINT ["python", "run_dashboard.py"]
+ENTRYPOINT ["python", "script/dashboard.py"]

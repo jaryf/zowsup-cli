@@ -5,7 +5,7 @@
 #
 # Build:
 #   docker build -f Dockerfile.frontend -t zowsup-dashboard-frontend .
-#   (run from dashboard-frontend/ directory)
+#   (run from app/dashboard/frontend/ directory)
 
 # ── Stage 1: build ──────────────────────────────────────────
 FROM node:20-alpine AS builder

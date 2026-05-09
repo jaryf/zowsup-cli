@@ -56,17 +56,16 @@ All critical checks must pass before continuing.
 ### 5. Start the backend
 
 ```bash
-python run_dashboard.py
-# Backend listens on http://0.0.0.0:5000
+python script/dashboard.py# Backend listens on http://0.0.0.0:5000
 ```
 
 ### 6. Build the frontend
 
 ```bash
-cd dashboard-frontend
+cd app/dashboard/frontend
 npm install
 npm run build
-# Output: dashboard-frontend/dist/
+# Output: app/dashboard/frontend/dist/
 ```
 
 ### 7. Serve the frontend
@@ -81,7 +80,7 @@ use Nginx or a CDN instead for production).
 ```nginx
 server {
     listen 80;
-    root /path/to/zowsup-cli/dashboard-frontend/dist;
+    root /path/to/zowsup-cli/app/dashboard/frontend/dist;
     index index.html;
 
     location /api/ {
@@ -158,9 +157,9 @@ Open **http://localhost:5000/api/docs** in a browser to view the Swagger UI.
 ```bash
 git pull
 pip install -r requirements.txt        # backend deps
-cd dashboard-frontend && npm install    # frontend deps
+cd app/dashboard/frontend && npm install    # frontend deps
 npm run build                          # rebuild frontend
-# Restart: python run_dashboard.py  (or: docker compose restart backend)
+# Restart: python script/dashboard.py  (or: docker compose restart backend)
 ```
 
 ---

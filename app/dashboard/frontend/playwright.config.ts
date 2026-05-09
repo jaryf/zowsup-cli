@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test'
  * Playwright configuration for Dashboard E2E tests.
  *
  * Tests require both services to be running:
- *   - Flask API: python run_dashboard.py  (port 5000)
+ *   - Flask API: python script/dashboard.py  (port 5000)
  *   - Vite dev: npm run dev               (port 5173)
  *
  * Or you can use `npm run build` + Flask serving static/ in production mode.
@@ -46,7 +46,7 @@ export default defineConfig({
   //     reuseExistingServer: !process.env.CI,
   //   },
   //   {
-  //     command: 'python ../run_dashboard.py',
+  //     command: 'python ../../../script/dashboard.py',
   //     url: 'http://localhost:5000/api/health',
   //     reuseExistingServer: !process.env.CI,
   //     cwd: '..',

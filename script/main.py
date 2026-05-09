@@ -11,12 +11,7 @@ from core.profile.profile import YowProfile
 from app.device_env import DeviceEnv
 from app.zowbot_values import ZowBotType
 
-# Optional dashboard status integration — does not affect bot if import fails.
-try:
-    from app.dashboard.utils.bot_status import write_status, clear_status
-    _HAS_STATUS = True
-except ImportError:
-    _HAS_STATUS = False
+from app.dashboard.bridge import dashboard as _db
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +71,7 @@ class Main(ConsoleMain):
  
         wabot = ZowBot(bot_id=botId,env=self.env,bot_type=ZowBotType.TYPE_RUN_SINGLETON)        
 
-        if _HAS_STATUS:
-            try:
-                write_status(running=True, jid=botId, phone=botId)
-            except Exception:
-                pass
+        _db.write_status(running=True, jid=botId, phone=botId)
 
         if botId:
             logger.info(self.env.networkEnv)
@@ -133,11 +124,7 @@ if __name__ == "__main__":
 
     Main().run(params,options)    
 
-    if _HAS_STATUS:
-        try:
-            clear_status(phone=botId)
-        except Exception:
-            pass
+    _db.clear_status(phone=params[0] if params else None)
 
 
 
