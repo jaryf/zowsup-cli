@@ -58,11 +58,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       label: t('nav.strategy'),
     },
     {
-      key: '/login',
-      icon: <RobotOutlined />,
-      label: t('nav.botManagement'),
-    },
-    {
       key: '/materials',
       icon: <PictureOutlined />,
       label: t('nav.materials'),
@@ -77,6 +72,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       icon: <ApartmentOutlined />,
       label: t('nav.agents'),
     },
+    {
+      key: '/login',
+      icon: <RobotOutlined />,
+      label: t('nav.botManagement'),
+    }
   ]
 
   const isZh = i18n.language.startsWith('zh')
