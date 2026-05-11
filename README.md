@@ -5,6 +5,39 @@ A restructured [Zowsup](https://github.com/clarithromycine/zowsup/) with async a
 
 ---
 
+## Architecture
+
+The system uses a three-tier model:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Server  (Flask + SocketIO, port 5000)           │
+│  ─ REST API, WebSocket, dashboard UI             │
+│  ─ SQLite DB (WAL mode)                          │
+│  ─ Agent registry, command dispatch              │
+└────────────────┬────────────────────────────────┘
+                 │  WebSocket  /agent namespace
+        ┌────────┴────────┐          ┌──────────────┐
+        │  Agent A  (PC)  │          │  Agent B ... │
+        │  script/agent.py│          │              │
+        └────────┬────────┘          └──────────────┘
+                 │  subprocess
+         ┌───────┴────────┐
+         │  Bot (phone)   │  ← script/main.py
+         │  Bot (phone)   │
+         └────────────────┘
+```
+
+| Tier | Process | Responsibility |
+|---|---|---|
+| **Server** | `script/dashboard_server.py` | Central hub — stores data, serves UI, dispatches commands to agents |
+| **Agent** | `script/agent.py` | Runs on any machine that hosts WhatsApp accounts; manages local bot subprocesses; connects back to the server via WebSocket |
+| **Bot** | `script/main.py` | One process per WhatsApp phone number; handles the actual WA protocol |
+
+The Server and Agent(s) can run on different machines. Multiple agents can be connected simultaneously, each managing a different set of phone numbers.
+
+---
+
 ## Requirements
 
 - Python 3.10+
@@ -202,12 +235,48 @@ npm run dev
 The dashboard is gated by the `DASHBOARD_MODE` environment variable.  
 `script/dashboard_server.py` sets it automatically. Running `script/main.py` alone never writes to the dashboard DB.
 
+### Running an Agent
+
+An agent process runs on any machine where bot accounts are stored.
+
+```bash
+# Required environment variables
+export AGENT_ID=my-server-01          # unique name for this agent
+export AGENT_KEY_SECRET=<hex-secret>  # 64-char hex secret from the dashboard
+export BACKEND_URL=http://<server-ip>:5000
+
+# Optional
+export AGENT_PHONES=628111,628222     # comma-separated; auto-discovered if unset
+export BOT_DRIVER_MODE=agent          # agent | local | "" (default: try agent, fall back to local)
+
+python script/agent.py
+```
+
+Register an agent secret from the dashboard Agents panel, or via API:
+
+```bash
+curl -X POST http://<server>:5000/api/bot/agents \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "my-server-01", "note": "HK server"}'
+# Response includes the secret — shown once, store it immediately
+```
+
+#### `BOT_DRIVER_MODE` behaviour
+
+| Value | Behaviour |
+|---|---|
+| `"agent"` | All start/stop operations require a connected agent; returns HTTP 503 if none is available |
+| `"local"` | Always runs bots as local subprocesses on the server; ignores agents |
+| `""` (default) | Tries the agent first; falls back to local subprocess if no agent is connected |
+
 ### Features
 
 - **Contact list** — avatars, unread badges, last-message preview, real-time updates
 - **Chat history** — per-contact conversation view with AI "thoughts" panel; translated messages show translated text first with original below
 - **Translation** — per-conversation toggle; auto-translates incoming messages via configurable provider; results persisted to DB
-- **Bot management** — account list, one-click start, live startup log stream, import/export 6-segment backups, failure marking and batch delete
+- **Bot management** — account list, one-click start, live startup log stream, import/export 6-segment backups, failure marking and batch delete; accounts can be filtered by agent
+- **Agent management** — register agents, view online/offline status, connected phones, last heartbeat
 - **Strategy management** — global and per-user AI reply strategies, history table, one-click toggle/rollback
 - **Real-time push** — WebSocket (Socket.IO) + SSE; no polling
 
@@ -215,11 +284,26 @@ The dashboard is gated by the `DASHBOARD_MODE` environment variable.
 
 | Action | How |
 |---|---|
-| Start a bot | Click **Start** on an account row; logs stream in a modal |
-| Import accounts | Paste 6-segment strings; `script/import6.py` runs per line |
+| Start a bot | Click **Start** on an account row; command is dispatched to the responsible agent (or run locally if no agent) |
+| Import accounts | Paste 6-segment strings → choose target Agent (or Local); `script/import6.py` runs on the selected machine |
 | Export accounts | Select rows → Export; `script/export6.py` output shown in a modal |
 | Mark / unmark failed | Manual toggle, or auto-set on permanent ban (403/401) |
 | Batch delete failed | One click removes all failure-marked account directories |
+| Filter by agent | Use the Agent dropdown above the table to show only accounts for a specific agent |
+
+### Agent alerts (real-time)
+
+The server emits `agent_alert` Socket.IO events to the frontend on:
+
+| Alert type | Trigger |
+|---|---|
+| `agent_offline` | Agent WebSocket disconnected |
+| `agent_heartbeat_overdue` | No heartbeat for > `AGENT_HEARTBEAT_OVERDUE` seconds (default 90 s) |
+| `command_timeout` | A command timed out on one attempt (retries remaining) |
+| `command_dead` | All retry attempts exhausted; job moved to dead-letter state |
+| `bot_start_failures` | N consecutive start failures for the same phone (default threshold: 3) |
+
+All dispatched commands are persisted in the `agent_command_jobs` SQLite table for audit and retry tracking.
 
 ### Translation
 
@@ -247,12 +331,17 @@ Provider config is saved to `data/translation_config.json` (excluded from git). 
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/bot/accounts` | List accounts with live status |
-| `POST` | `/api/bot/import` | Import 6-segment strings |
+| `GET` | `/api/bot/accounts` | List accounts with live status and agent assignment |
+| `POST` | `/api/bot/import` | Import 6-segment strings (optional `agent_id` to import on a remote agent) |
 | `POST` | `/api/bot/export` | Export 6-segment strings |
 | `DELETE` | `/api/bot/accounts/<phone>` | Delete account directory |
 | `PATCH` | `/api/bot/accounts/<phone>/mark-failed` | Toggle failure mark |
 | `DELETE` | `/api/bot/accounts` | Batch-delete all failed accounts |
+| `GET` | `/api/bot/agents` | List registered agents with online status |
+| `POST` | `/api/bot/agents` | Register a new agent (returns one-time secret) |
+| `DELETE` | `/api/bot/agents/<id>` | Delete agent definition |
+| `POST` | `/api/bot/start` | Start a bot (routes to agent or local based on `BOT_DRIVER_MODE`) |
+| `POST` | `/api/bot/logout` | Stop / logout a bot |
 | `PATCH` | `/api/strategy/<id>/toggle` | Toggle strategy active state |
 | `DELETE` | `/api/strategy/<id>` | Delete strategy row |
 | `GET` | `/api/translation/config` | Get translation provider config |
@@ -300,8 +389,9 @@ zowsup-cli/
 ├── consonance/             # Noise protocol handshake
 ├── axolotl/                # Signal Protocol encryption
 ├── script/
-│   ├── main.py             # Run the bot
-│   ├── dashboard_server.py # Run the dashboard backend
+│   ├── main.py             # Run a single bot (one phone number)
+│   ├── agent.py            # Agent process — manages local bots, connects to server
+│   ├── dashboard_server.py # Run the dashboard backend (Server tier)
 │   ├── start_dashboard.py  # Run backend + frontend together
 │   ├── regwithscan.py      # Register via QR scan
 │   ├── regwithlinkcode.py  # Register via link code
