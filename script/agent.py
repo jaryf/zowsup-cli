@@ -454,6 +454,46 @@ def command(data):
             result = {"phones": _phone_list()}
         elif cmd_type == "send_message":
             result = _enqueue_send_task(payload)
+        elif cmd_type == "import_account":
+            lines = [str(l).strip() for l in payload.get("lines", []) if str(l).strip()]
+            if not lines:
+                result = {"ok": False, "error": "lines required"}
+            else:
+                script = ROOT / "script" / "import6.py"
+                if not script.exists():
+                    result = {"ok": False, "error": "script/import6.py not found"}
+                else:
+                    import_results = []
+                    for line in lines:
+                        try:
+                            proc = subprocess.run(
+                                [sys.executable, str(script), line],
+                                capture_output=True,
+                                text=True,
+                                timeout=30,
+                                cwd=str(ROOT),
+                                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                            )
+                            ok = proc.returncode == 0
+                            if ok:
+                                phone = line.split(",")[0]
+                                logger.info("Imported account phone=%s", phone)
+                            import_results.append({
+                                "line": line[:20] + "...",
+                                "ok": ok,
+                                "stderr": proc.stderr.strip()[:200] if proc.stderr else "",
+                            })
+                        except subprocess.TimeoutExpired:
+                            import_results.append({"line": line[:20] + "...", "ok": False, "stderr": "timeout"})
+                        except Exception as exc:
+                            import_results.append({"line": line[:20] + "...", "ok": False, "stderr": str(exc)})
+                    success = sum(1 for r in import_results if r["ok"])
+                    result = {
+                        "ok": True,
+                        "imported": success,
+                        "total": len(import_results),
+                        "results": import_results,
+                    }
         else:
             result = {"ok": False, "error": f"unknown command: {cmd_type}"}
     except Exception as exc:

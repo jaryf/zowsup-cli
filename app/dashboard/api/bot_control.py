@@ -1047,22 +1047,49 @@ def import_account():
     """
     Import one or more 6-segment bot strings.
 
-    Request body:  {"lines": ["phone,pk1,sk1,pk2,sk2,sixth", ...]}
+    Request body:
+        {
+          "lines":    ["phone,pk1,sk1,pk2,sk2,sixth", ...],
+          "agent_id": "pc"   ← optional; if provided, the import runs on that agent
+        }
+
+    When agent_id is given, the lines are dispatched to the agent via WebSocket
+    and the agent runs import6.py on its own machine.
+    When agent_id is absent, import6.py is executed locally on the server.
     """
     body = request.get_json(silent=True) or {}
-    lines = body.get("lines", [])
-    if not lines or not isinstance(lines, list):
+    lines = [str(l).strip() for l in body.get("lines", []) if str(l).strip()]
+    if not lines:
         return {"error": "lines (list) required"}, 400
 
+    agent_id = str(body.get("agent_id", "")).strip() or None
+
+    # ── Remote import via agent ──────────────────────────────────────────────
+    if agent_id:
+        try:
+            from app.dashboard.api.agent_gateway import dispatch_command
+        except ImportError:
+            return {"error": "agent_gateway not available"}, 500
+
+        result = dispatch_command(agent_id, "import_account", {"lines": lines},
+                                  timeout=max(30.0, len(lines) * 30.0))
+        if result is None:
+            return {"error": f"Agent '{agent_id}' is not connected or did not respond"}, 503
+        if not result.get("ok"):
+            return {"error": result.get("error", "import failed on agent")}, 502
+        return {
+            "imported": result.get("imported", 0),
+            "total": result.get("total", len(lines)),
+            "results": result.get("results", []),
+        }
+
+    # ── Local import ─────────────────────────────────────────────────────────
     script_path = _resolve_script("import6.py")
     if not script_path.exists():
         return {"error": "script/import6.py not found"}, 404
 
     results = []
     for line in lines:
-        line = str(line).strip()
-        if not line:
-            continue
         try:
             proc = subprocess.run(
                 [sys.executable, str(script_path), line],

@@ -227,8 +227,9 @@ export async function deleteFailedAccounts(): Promise<{ deleted: string[]; skipp
 
 export async function importBotAccounts(
   lines: string[],
+  agentId?: string | null,
 ): Promise<{ imported: number; total: number; results: ImportResult[] }> {
-  const { data } = await apiClient.post('/bot/import', { lines })
+  const { data } = await apiClient.post('/bot/import', { lines, agent_id: agentId ?? null })
   return data
 }
 

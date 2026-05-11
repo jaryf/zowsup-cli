@@ -55,8 +55,9 @@ import {
   deleteFailedAccounts,
   importBotAccounts,
   exportBotAccounts,
+  fetchAgents,
 } from '../api/endpoints'
-import type { BotAccount } from '../api/endpoints'
+import type { BotAccount, AgentInfo } from '../api/endpoints'
 import { getApiToken } from '../api/client'
 import { useTranslation } from 'react-i18next'
 
@@ -285,6 +286,13 @@ const AccountsSection: React.FC = () => {
   const [importText, setImportText] = useState('')
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<string | null>(null)
+  const [importAgentId, setImportAgentId] = useState<string | null>(null)
+  const [agentList, setAgentList] = useState<AgentInfo[]>([])
+
+  // Load agent list once for import selector
+  React.useEffect(() => {
+    fetchAgents().then((r) => setAgentList(r.agents)).catch(() => {})
+  }, [])
 
   // Export modal
   const [exportOpen, setExportOpen] = useState(false)
@@ -449,7 +457,7 @@ const AccountsSection: React.FC = () => {
     setImporting(true)
     setImportResult(null)
     try {
-      const res = await importBotAccounts(lines)
+      const res = await importBotAccounts(lines, importAgentId === '__local__' ? null : importAgentId)
       setImportResult(t('bot.importDone', { imported: res.imported, total: res.total }))
       if (res.imported > 0) {
         load()
@@ -604,7 +612,7 @@ const AccountsSection: React.FC = () => {
           </Button>
           <Button
             icon={<CloudUploadOutlined />}
-            onClick={() => { setImportOpen(true); setImportResult(null) }}
+            onClick={() => { setImportOpen(true); setImportResult(null); setImportAgentId(null) }}
           >
             {t('common.import')}
           </Button>
@@ -708,6 +716,31 @@ const AccountsSection: React.FC = () => {
         <Paragraph type="secondary" style={{ marginBottom: 8 }}>
           {t('bot.importFormat')}
         </Paragraph>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 4, fontWeight: 500 }}>导入目标 Agent</div>
+          <Select
+            style={{ width: '100%' }}
+            placeholder="本机（不指定 Agent）"
+            allowClear
+            value={importAgentId ?? undefined}
+            onChange={(v) => setImportAgentId(v ?? null)}
+            options={[
+              { value: '__local__', label: '本机（不指定 Agent）' },
+              ...agentList.map((a) => ({
+                value: a.agent_id,
+                label: (
+                  <span>
+                    <ApartmentOutlined style={{ marginRight: 6 }} />
+                    {a.agent_id}
+                    {a.online
+                      ? <Tag color="green" style={{ marginLeft: 6, fontSize: 11 }}>在线</Tag>
+                      : <Tag color="default" style={{ marginLeft: 6, fontSize: 11 }}>离线</Tag>}
+                  </span>
+                ),
+              })),
+            ]}
+          />
+        </div>
         <Input.TextArea
           rows={8}
           value={importText}
