@@ -236,6 +236,16 @@ def _bot_status(phone: str) -> dict:
             os.kill(pid, 0)
         except (ProcessLookupError, PermissionError):
             running = False
+
+    # If the status file hasn't been written yet (bot just launched),
+    # fall back to the in-memory process registry.
+    if not running:
+        with _bot_procs_lock:
+            proc = _bot_procs.get(phone)
+        if proc and proc.poll() is None:
+            running = True
+            pid = proc.pid
+
     uptime = None
     if running and status.get("started_at"):
         uptime = int(time.time() - status["started_at"])
@@ -422,8 +432,12 @@ def command(data):
                 result = {"ok": False, "error": "phone required"}
             else:
                 result = _start_bot(phone)
-                # Emit updated status immediately so backend doesn't wait for heartbeat
+                # Emit status immediately (process alive → running=True via _bot_procs check)
                 _emit_bot_status(phone)
+                # Schedule a re-emit after the bot has had time to connect and write
+                # its status file (so the JID gets propagated too)
+                threading.Timer(8.0, _emit_bot_status, args=(phone,)).start()
+                threading.Timer(20.0, _emit_bot_status, args=(phone,)).start()
         elif cmd_type == "stop_bot":
             if not phone:
                 result = {"ok": False, "error": "phone required"}

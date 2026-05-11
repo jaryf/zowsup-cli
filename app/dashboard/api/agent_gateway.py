@@ -351,7 +351,44 @@ def register_agent_namespace(sio) -> None:
         """Agent acknowledges a command with its result."""
         if not isinstance(data, dict):
             return
+        from flask import request as freq
+        sid = freq.sid
         cmd_id = str(data.get("cmd_id", ""))
+        cmd_type = data.get("type", "")
+
+        # For start/stop commands, eagerly update _agent_bot_status HERE,
+        # before waking dispatch_command.  This ensures that by the time the
+        # HTTP response reaches the frontend and it calls fetchBotAccounts(),
+        # the status is already correct — avoiding the race condition where
+        # on_agent_event (with the bot_status payload) runs in a separate
+        # thread and may finish after dispatch_command returns.
+        if cmd_type in ("start_bot", "stop_bot") and data.get("ok"):
+            phone = str(data.get("phone", "")).lstrip("+")
+            if phone:
+                with _registry_lock:
+                    info = _agents_by_sid.get(sid)
+                agent_id = info["agent_id"] if info else None
+                if agent_id:
+                    running = (cmd_type == "start_bot")
+                    with _bot_status_lock:
+                        existing = _agent_bot_status.get(phone, {})
+                        _agent_bot_status[phone] = {
+                            **existing,
+                            "running": running,
+                            "agent_id": agent_id,
+                        }
+                    with _registry_lock:
+                        if _agent_by_phone.get(phone) != agent_id:
+                            _agent_by_phone[phone] = agent_id
+                            if info and phone not in info.get("phones", []):
+                                info.setdefault("phones", []).append(phone)
+                    # Push the status change to the frontend
+                    sio.emit(
+                        "bot_status_changed",
+                        {"phone": phone, "running": running, "agent_id": agent_id},
+                        namespace="/",
+                    )
+
         with _pending_lock:
             rec = _pending.get(cmd_id)
         if rec:
