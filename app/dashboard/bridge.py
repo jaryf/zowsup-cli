@@ -166,9 +166,9 @@ class _Dashboard:
             return None
 
     def get_ai_enabled(self, jid: str) -> bool:
-        """Return True if AI auto-reply is enabled for this JID (default: True)."""
+        """Return per-JID AI toggle; if no row yet, fall back to global config.conf default."""
         if not self.db_path:
-            return True
+            return self._global_ai_default()
         try:
             import sqlite3 as _sqlite3  # noqa: PLC0415
             conn = _sqlite3.connect(self.db_path, timeout=3)
@@ -176,11 +176,26 @@ class _Dashboard:
                 row = conn.execute(
                     "SELECT ai_enabled FROM ai_settings WHERE jid = ?", (jid,)
                 ).fetchone()
-                return row is None or bool(row[0])
+                if row is not None:
+                    return bool(row[0])
+                return self._global_ai_default()
             finally:
                 conn.close()
         except Exception as exc:
             logger.debug("bridge.get_ai_enabled failed: %s", exc)
+            return self._global_ai_default()
+
+    @staticmethod
+    def _global_ai_default() -> bool:
+        """Read the global AI enabled flag from conf/config.conf (fallback: True)."""
+        try:
+            import configparser as _cp  # noqa: PLC0415
+            from pathlib import Path as _Path  # noqa: PLC0415
+            project_root = _Path(__file__).resolve().parent.parent.parent
+            conf = _cp.ConfigParser()
+            conf.read(project_root / "conf" / "config.conf", encoding="utf-8")
+            return conf.getboolean("AI_LLM_ACTIVE", "enabled", fallback=True)
+        except Exception:
             return True
 
     # ── Chat messages ─────────────────────────────────────────────────────

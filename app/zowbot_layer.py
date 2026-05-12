@@ -1077,15 +1077,10 @@ class ZowBotLayer(YowInterfaceLayer):
                 
                 # Read AI configuration from config.conf
                 ai_config = self._load_ai_config()
-                
-                # Check if AI module is enabled
-                if not ai_config.get('ai_llm_active', {}).get('enabled', True):
-                    self.logger.debug("🔇 AI module disabled in config")
-                    self.ai_service = None
-                    # Still wire up dashboard DB path so messages are persisted
-                    self._dashboard_db_path = _db.db_path
-                    return
-                
+
+                # Always initialize AIService so per-conversation toggles can
+                # override the global default.  The global enabled flag is only
+                # the DEFAULT for new conversations (handled by get_ai_enabled).
                 self.ai_service = AIService(
                     db_path=str(db_file),
                     config=ai_config

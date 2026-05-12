@@ -202,7 +202,7 @@ CREATE TABLE IF NOT EXISTS bot_instances (
 _DDL_AI_SETTINGS = """
 CREATE TABLE IF NOT EXISTS ai_settings (
     jid         TEXT PRIMARY KEY,
-    ai_enabled  INTEGER NOT NULL DEFAULT 1   -- 1=AI on (default), 0=AI off (human takeover)
+    ai_enabled  INTEGER NOT NULL DEFAULT 0   -- 0=follow global config.conf default, set explicitly to override
 );
 """
 

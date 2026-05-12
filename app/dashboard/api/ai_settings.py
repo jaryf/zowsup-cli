@@ -8,8 +8,10 @@ Endpoints
 GET  /api/ai/settings/<jid>   — return {"jid": str, "ai_enabled": bool}
 POST /api/ai/settings/<jid>   — body {"ai_enabled": bool} → return same
 """
+import configparser
 import logging
 import sqlite3
+from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 
@@ -32,6 +34,17 @@ def _get_db_path() -> str:
     return current_app.config["DASHBOARD_DB_PATH"]
 
 
+def _global_ai_default() -> bool:
+    """Read the global AI enabled flag from conf/config.conf (fallback: True)."""
+    try:
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        conf = configparser.ConfigParser()
+        conf.read(project_root / "conf" / "config.conf", encoding="utf-8")
+        return conf.getboolean("AI_LLM_ACTIVE", "enabled", fallback=True)
+    except Exception:
+        return True
+
+
 # ---------------------------------------------------------------------------
 # GET /api/ai/settings/<jid>
 # ---------------------------------------------------------------------------
@@ -50,12 +63,12 @@ def get_ai_settings(jid: str):
             row = conn.execute(
                 "SELECT ai_enabled FROM ai_settings WHERE jid = ?", (jid,)
             ).fetchone()
-            ai_enabled = bool(row[0]) if row is not None else True
+            ai_enabled = bool(row[0]) if row is not None else _global_ai_default()
         finally:
             conn.close()
     except Exception as exc:
         logger.warning("get_ai_settings DB error: %s", exc)
-        ai_enabled = True
+        ai_enabled = _global_ai_default()
 
     return jsonify({"jid": jid, "ai_enabled": ai_enabled})
 
