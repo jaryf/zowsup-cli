@@ -9,6 +9,7 @@ GET  /api/bot/status          — Current bot running state (reads data/bot_stat
 POST /api/bot/login-scan      — Launch regwithscan.py subprocess; returns {pid}
 GET  /api/bot/qr-stream       — SSE stream that pushes QR-code lines from subprocess stdout
 POST /api/bot/login-linkcode  — Launch regwithlinkcode.py; return 8-char link code
+POST /api/bot/md-link         — Run md.link on logged-in bot to pair a companion device
 POST /api/bot/logout          — Send SIGTERM to running bot via PID in status file
 
 Design constraints
@@ -506,6 +507,75 @@ def post_login_linkcode():
     else:
         proc.terminate()
         return {"error": "Link code not received within timeout"}, 504
+
+
+# ---------------------------------------------------------------------------
+# B.4b  POST /api/bot/md-link
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/md-link")
+@limiter.limit("10 per minute")
+def post_md_link():
+    """
+    Pair a companion device by running the md.link command on a logged-in bot.
+
+    Request body (JSON): {"phone": "989334018988", "qr_code": "ref,pubKey,identity,secret"}
+    Response:            {"ok": true, "phone": "...", "stdout": "...", "stderr": "..."}
+    """
+    body = request.get_json(silent=True) or {}
+    phone = str(body.get("phone", "")).strip().lstrip("+")
+    qr_code = str(body.get("qr_code", "")).strip()
+
+    if not phone:
+        return {"error": "phone required"}, 400
+    if not phone.isdigit() or not (7 <= len(phone) <= 15):
+        return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
+    if not qr_code:
+        return {"error": "qr_code required"}, 400
+    if qr_code.count(",") != 3:
+        return {"error": "qr_code must be a 4-part comma-separated string"}, 400
+
+    # Try agent first when an agent manages the phone
+    try:
+        agent_result = _try_agent_command(phone, "md_link", {"phone": phone, "qr_code": qr_code})
+    except RuntimeError as exc:
+        return {"error": str(exc)}, 503
+    if agent_result is not None:
+        return agent_result
+    if _BOT_DRIVER_MODE == "agent":
+        return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
+
+    script_path = _resolve_script("main.py")
+    if not script_path.exists():
+        return {"error": "script/main.py not found"}, 404
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script_path), phone, "md.link", qr_code],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=90,
+            cwd=str(Path.cwd()),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": "md.link timed out"}, 504
+    except OSError as exc:
+        logger.error("Failed to execute md.link: %s", exc)
+        return {"error": str(exc)}, 500
+
+    ok = proc.returncode == 0
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    logger.info("md.link finished for phone=%s rc=%s", phone, proc.returncode)
+    return {
+        "ok": ok,
+        "phone": phone,
+        "returncode": proc.returncode,
+        "stdout": stdout[-4000:],
+        "stderr": stderr[-2000:],
+    }, (200 if ok else 502)
 
 
 # ---------------------------------------------------------------------------
