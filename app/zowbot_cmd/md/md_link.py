@@ -24,6 +24,8 @@ class Cmd_Md_Link(BotCommand):
         await bot.botLayer.resetSync(params, options)        
         profile = bot.botLayer.getStack().getProp("profile")
         qr_str = params[0]
+        # 替换qr_str里面的 https://wa.me/settings/linked_devices#
+        qr_str = qr_str.replace("https://wa.me/settings/linked_devices#", "")
         ref, pubKey, deviceIdentity, keyIndexList = Utils.generateMultiDeviceParamsFromQrCode(qr_str, profile)
         
 

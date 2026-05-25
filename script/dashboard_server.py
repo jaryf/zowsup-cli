@@ -87,6 +87,20 @@ if __name__ == "__main__":
     logger.info(f"Starting Dashboard server on http://{host}:{port}  debug={debug}")
     logger.info(f"Dashboard DB: {CONFIG['DASHBOARD_DB_PATH']}")
 
+    # ---------------------------------------------------------------------------
+    # Print all registered routes
+    # ---------------------------------------------------------------------------
+    rules = sorted(app.url_map.iter_rules(), key=lambda r: str(r.rule))
+    logger.info(f"Registered routes ({len(rules)}):")
+    max_rule = max((len(str(r.rule)) for r in rules), default=0)
+    max_endpoint = max((len(r.endpoint) for r in rules), default=0)
+    for rule in rules:
+        methods = sorted(rule.methods - {"HEAD", "OPTIONS"}) if rule.methods else []
+        methods_str = ",".join(methods) if methods else "-"
+        logger.info(
+            f"  {methods_str:<20}  {str(rule.rule):<{max_rule}}  -> {rule.endpoint:<{max_endpoint}}"
+        )
+
     # Use socketio.run() when Flask-SocketIO is active (supports WS upgrades).
     # Falls back to standard app.run() when SocketIO is not configured.
     sio = app.extensions.get("socketio")
