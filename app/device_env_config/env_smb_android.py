@@ -22,7 +22,7 @@ class EnvSmbAndroid:
         #在线计算地址_MD5_CLASSES, classes.dex拖进去就可以
         # https://the-x.cn/zh-cn/hash/MessageDigestAlgorithm.aspx        
 
-        self.version = "2.26.10.72"
+        self.version = "2.26.19.73"
         self.md5Classes = "c3sICeHaKi851QjPY0cMKQ=="
         #self.key = "VROA1coOL6M5ywTDPnPB/6CwjpIl2UjqEbIDpuf4TtgbPMj9sEhhi3gqtaG1PM/Jy4VODs6UQE7SMLcqzf/XVQ=="   
         self.key = "wt9VMkXhC2ODULqh718Itr60VOm9tYtDWKmVD+48S96rbE9zYW0K0L+6Y82FKtRku9juFnml6nDUAMxHHf0c2A=="

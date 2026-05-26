@@ -56,7 +56,7 @@ class EnvSmbIos:
     }   
 
     def __init__(self,                 
-                 version = "2.26.13.74",                 
+                 version = "2.26.19.76",
                  osVersion = "18.1.1",
                  manufacturer = "Apple",
                  deviceName = "iPhone_15_Pro_Max",                                                   
